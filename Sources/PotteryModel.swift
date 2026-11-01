@@ -15,6 +15,7 @@ final class PotteryModel {
     private(set) var glaze: Glaze = .clay
     private(set) var baseShape: BaseShape = .circle
     private(set) var twist: Float = 0
+    private(set) var pattern: Pattern = .stripes
 
     /// 重新擠出陶器所需的全部資料
     var spec: VesselSpec { VesselSpec(radii: radii, sides: baseShape.sides, twist: twist) }
@@ -31,6 +32,7 @@ final class PotteryModel {
         var glaze: Glaze
         var baseShape: BaseShape
         var twist: Float
+        var pattern: Pattern
     }
 
     private static let historyLimit = 60
@@ -43,7 +45,7 @@ final class PotteryModel {
     var canRedo: Bool { !redoStack.isEmpty }
 
     private var snapshot: Snapshot {
-        Snapshot(radii: radii, glaze: glaze, baseShape: baseShape, twist: twist)
+        Snapshot(radii: radii, glaze: glaze, baseShape: baseShape, twist: twist, pattern: pattern)
     }
 
     private func restore(_ s: Snapshot) {
@@ -51,6 +53,7 @@ final class PotteryModel {
         glaze = s.glaze
         baseShape = s.baseShape
         twist = s.twist
+        pattern = s.pattern
     }
 
     private func record(_ before: Snapshot) {
@@ -75,6 +78,12 @@ final class PotteryModel {
         guard newGlaze != glaze else { return }
         record(snapshot)
         glaze = newGlaze
+    }
+
+    func setPattern(_ newPattern: Pattern) {
+        guard newPattern != pattern else { return }
+        record(snapshot)
+        pattern = newPattern
     }
 
     func setBaseShape(_ shape: BaseShape) {
@@ -221,6 +230,23 @@ final class PotteryModel {
         private func smoothstep(_ a: Float, _ b: Float, _ x: Float) -> Float {
             let t = min(max((x - a) / (b - a), 0), 1)
             return t * t * (3 - 2 * t)
+        }
+    }
+
+    /// 釉面上的花紋。貼圖由程式畫出，再乘上釉色
+    enum Pattern: CaseIterable, Identifiable, Hashable {
+        case plain, stripes, checker, dots, waves
+
+        var id: Self { self }
+
+        var title: String {
+            switch self {
+            case .plain: "素面"
+            case .stripes: "條紋"
+            case .checker: "方格"
+            case .dots: "圓點"
+            case .waves: "波浪"
+            }
         }
     }
 

@@ -8,6 +8,9 @@ struct ContentView: View {
     @State private var lastDragPoint: CGPoint?
     @State private var zoomStart: Float?
     @State private var isSculpting = false
+    @State private var viewHeight: CGFloat = 0
+    @State private var headerFrame = CGRect.zero
+    @State private var controlsFrame = CGRect.zero
 
     private static let brown = Color(red: 0.45, green: 0.25, blue: 0.12)
 
@@ -18,17 +21,21 @@ struct ContentView: View {
                 content.add(scene.root)
                 scene.start(in: content)
                 scene.setGlaze(model.glaze)
-                await scene.rebuild(model.spec)
+                scene.setPattern(model.pattern)
+                scene.rebuild(model.spec)
             }
             .gesture(dragGesture)
             .simultaneousGesture(zoomGesture)
-            .onChange(of: model.spec) {
-                Task { await scene.rebuild(model.spec) }
-            }
+            .onChange(of: model.spec) { scene.rebuild(model.spec) }
+            .onChange(of: model.pattern) { scene.setPattern(model.pattern) }
             .onChange(of: model.glaze) { scene.setGlaze(model.glaze) }
             .onChange(of: model.showWireframe) { scene.setWireframe(model.showWireframe) }
             .onChange(of: model.camera) { scene.setCamera(model.camera) }
-            .onGeometryChange(for: CGSize.self) { $0.size } action: { scene.setViewport($0) }
+            .onGeometryChange(for: CGSize.self) { $0.size } action: {
+                scene.setViewport($0)
+                viewHeight = $0.height
+                updateInsets()
+            }
             .ignoresSafeArea()
 
             VStack {
@@ -40,12 +47,26 @@ struct ContentView: View {
                 }
                 .foregroundStyle(Self.brown)
                 .allowsHitTesting(false)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                    headerFrame = $0
+                    updateInsets()
+                }
 
                 Spacer()
                 controls
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                        controlsFrame = $0
+                        updateInsets()
+                    }
             }
             .padding()
         }
+    }
+
+    /// 標題底部到面板頂端之間才是看得到陶器的地方，把陶器移到那裡的正中央
+    private func updateInsets() {
+        guard viewHeight > 0, controlsFrame.height > 0 else { return }
+        scene.setInsets(top: headerFrame.maxY, bottom: viewHeight - controlsFrame.minY)
     }
 
     private var hint: String {
@@ -169,6 +190,16 @@ struct ContentView: View {
                 }
                 .tint(Self.brown)
             }
+
+            Picker("花紋", selection: Binding(
+                get: { model.pattern },
+                set: { model.setPattern($0) }
+            )) {
+                ForEach(PotteryModel.Pattern.allCases) { pattern in
+                    Text(pattern.title).tag(pattern)
+                }
+            }
+            .pickerStyle(.segmented)
 
             HStack(spacing: 12) {
                 ForEach(PotteryModel.Glaze.allCases) { glaze in
