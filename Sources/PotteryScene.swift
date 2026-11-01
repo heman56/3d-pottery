@@ -15,7 +15,7 @@ final class PotteryScene {
     )
 
     private var glaze = PotteryModel.Glaze.clay
-    private var pattern = PotteryModel.Pattern.plain
+    private var pattern = PotteryModel.Pattern.stripes
     private var wireframe = false
     private var material: any RealityKit.Material = PotteryScene.makeMaterial(color: .brown, glazed: false, wireframe: false, texture: nil)
     private var textures: [PotteryModel.Pattern: TextureResource] = [:]
@@ -426,8 +426,6 @@ final class PotteryScene {
             ink.setStroke()
             let cell: CGFloat = 64   // 16 × 8 格，橫向剛好接得起來
             switch pattern {
-            case .plain:
-                break
             case .stripes:
                 for column in stride(from: 0, to: 16, by: 2) {
                     context.fill(CGRect(x: CGFloat(column) * cell, y: 0, width: cell, height: height))

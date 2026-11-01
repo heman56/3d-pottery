@@ -52,7 +52,18 @@ struct ContentView: View {
                     updateInsets()
                 }
 
-                Spacer()
+                // 退回、重做很常用：放大，放在模型的左右兩側，拇指好按
+                HStack {
+                    FloatingButton(title: "退回", symbol: "arrow.uturn.backward", isEnabled: model.canUndo) {
+                        model.undo()
+                    }
+                    Spacer()
+                    FloatingButton(title: "重做", symbol: "arrow.uturn.forward", isEnabled: model.canRedo) {
+                        model.redo()
+                    }
+                }
+                .frame(maxHeight: .infinity)
+
                 controls
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
                         controlsFrame = $0
@@ -138,12 +149,6 @@ struct ContentView: View {
                     model.mode = .look
                 }
                 Divider().frame(height: 40)
-                ToolButton(title: "退回", symbol: "arrow.uturn.backward", isEnabled: model.canUndo) {
-                    model.undo()
-                }
-                ToolButton(title: "重做", symbol: "arrow.uturn.forward", isEnabled: model.canRedo) {
-                    model.redo()
-                }
                 ToolButton(title: "網格", symbol: "grid", isOn: model.showWireframe) {
                     model.showWireframe.toggle()
                 }
@@ -189,6 +194,19 @@ struct ContentView: View {
                     if editing { model.beginStroke() } else { model.endStroke() }
                 }
                 .tint(Self.brown)
+                Button {
+                    model.resetTwist()
+                } label: {
+                    Label("歸零", systemImage: "arrow.counterclockwise")
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 40)
+                        .background(Capsule().fill(Color(red: 0.62, green: 0.38, blue: 0.22)))
+                        .opacity(model.twist == 0 ? 0.35 : 1)
+                }
+                .buttonStyle(.plain)
+                .disabled(model.twist == 0)
             }
 
             Picker("花紋", selection: Binding(
@@ -219,6 +237,32 @@ struct ContentView: View {
         .padding(14)
         .frame(maxWidth: 480)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28))
+    }
+}
+
+/// 模型兩側的大圓鈕（退回／重做）
+private struct FloatingButton: View {
+    let title: String
+    let symbol: String
+    var isEnabled = true
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: symbol)
+                    .font(.system(size: 28, weight: .bold))
+                Text(title)
+                    .font(.system(.footnote, design: .rounded, weight: .bold))
+            }
+            .foregroundStyle(.white)
+            .frame(width: 76, height: 76)
+            .background(Circle().fill(Color(red: 0.62, green: 0.38, blue: 0.22)))
+            .shadow(radius: 3)
+            .opacity(isEnabled ? 1 : 0.35)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
     }
 }
 

@@ -92,6 +92,13 @@ final class PotteryModel {
         baseShape = shape
     }
 
+    /// 「歸零」按鈕：算一步，可以退回
+    func resetTwist() {
+        guard twist != 0 else { return }
+        record(snapshot)
+        twist = 0
+    }
+
     /// 扭轉滑桿：拖一次算一步
     func setTwist(_ value: Float) {
         commitStrokeStart()
@@ -235,13 +242,12 @@ final class PotteryModel {
 
     /// 釉面上的花紋。貼圖由程式畫出，再乘上釉色
     enum Pattern: CaseIterable, Identifiable, Hashable {
-        case plain, stripes, checker, dots, waves
+        case stripes, checker, dots, waves
 
         var id: Self { self }
 
         var title: String {
             switch self {
-            case .plain: "素面"
             case .stripes: "條紋"
             case .checker: "方格"
             case .dots: "圓點"
