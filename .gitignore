@@ -1,0 +1,10 @@
+# 編譯產物
+build/
+DerivedData/
+
+# 由 project.yml 用 xcodegen 產生
+*.xcodeproj/
+
+# Xcode / macOS
+xcuserdata/
+.DS_Store
