@@ -162,7 +162,7 @@ struct ContentView: View {
 
     // MARK: 控制列
 
-    /// 「照片」花紋的設定：選照片、調大小與高度（照片像貼紙貼一次，大小是最長邊的實際長度）
+    /// 「照片」花紋的設定：選照片、調整左右與上下各拼幾張（整數，貼滿陶器外面）
     private var photoControls: some View {
         VStack(spacing: 6) {
             PhotosPicker(selection: $pickedItem, matching: .images) {
@@ -174,20 +174,36 @@ struct ContentView: View {
                     .background(Capsule().fill(Color(red: 0.62, green: 0.38, blue: 0.22)))
             }
             if model.photo != nil {
-                stickerSlider("大小", value: model.stickerSize, range: 0.04...0.22) { model.setStickerSize($0) }
-                stickerSlider("高度", value: model.stickerHeight, range: 0...1) { model.setStickerHeight($0) }
+                tileSlider("左右", value: model.tilesAround) { model.setTilesAround($0) }
+                HStack(spacing: 8) {
+                    tileSlider("上下", value: model.tilesUp) { model.setTilesUp($0) }
+                    Button {
+                        model.fitTilesToPhoto()
+                    } label: {
+                        Label("自動", systemImage: "wand.and.stars")
+                            .font(.system(.subheadline, design: .rounded, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 36)
+                            .background(Capsule().fill(Color(red: 0.62, green: 0.38, blue: 0.22)))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
     }
 
-    private func stickerSlider(_ title: String, value: Float, range: ClosedRange<Float>,
-                               set: @escaping (Float) -> Void) -> some View {
+    /// 張數滑桿：整數 1 到 12，一格一張
+    private func tileSlider(_ title: String, value: Int, set: @escaping (Int) -> Void) -> some View {
         HStack(spacing: 10) {
-            Text(title)
+            Text("\(title) \(value) 張")
                 .font(.system(.subheadline, design: .rounded, weight: .bold))
                 .foregroundStyle(Self.brown)
-                .frame(width: 44, alignment: .leading)
-            Slider(value: Binding(get: { value }, set: set), in: range) { editing in
+                .frame(width: 84, alignment: .leading)
+            Slider(
+                value: Binding(get: { Double(value) }, set: { set(Int($0.rounded())) }),
+                in: 1...Double(PotteryModel.maxTiles), step: 1
+            ) { editing in
                 if editing { model.beginStroke() } else { model.endStroke() }
             }
             .tint(Self.brown)

@@ -165,15 +165,19 @@ final class PotteryScene {
 
         // 相機位置不動，只讓視線往下傾斜：畫面上的陶器整個往上移，而看陶器的角度（杯口的橢圓）不變。
         // 如果連相機一起平移，面板很高的 iPhone 上相機會降到杯口的高度，只看得到杯口的邊
+        // 相機的「上」要用傾斜前的視線算出來並明確指定：「上視」時視線幾乎垂直向下，
+        // 傾斜後視線會越過正下方，look(at:) 預設的上方向會翻轉 180°，陶器就會掉到面板下面
         let forward = simd_normalize(target - position)
+        var upVector = SIMD3<Float>(0, 1, 0)
         let right = simd_cross(forward, [0, 1, 0])
-        if viewHeight > 0, simd_length(right) > 1e-4 {
-            let up = simd_cross(simd_normalize(right), forward)
-            let fraction = (bottomInset - topInset) / (2 * viewHeight)
-            let shift = fraction * 2 * pose.distance * tan(verticalFov / 2)
-            target -= up * shift
+        if simd_length(right) > 1e-4 {
+            upVector = simd_cross(simd_normalize(right), forward)
+            if viewHeight > 0 {
+                let fraction = (bottomInset - topInset) / (2 * viewHeight)
+                target -= upVector * (fraction * 2 * pose.distance * tan(verticalFov / 2))
+            }
         }
-        camera.look(at: target, from: position, relativeTo: nil)
+        camera.look(at: target, from: position, upVector: upVector, relativeTo: nil)
 
         let backdropPosition = Self.lookAt - direction * 1.8
         backdrop.look(at: backdropPosition - direction, from: backdropPosition, relativeTo: nil)
@@ -200,41 +204,27 @@ final class PotteryScene {
 
     func setGlaze(_ glaze: PotteryModel.Glaze) {
         self.glaze = glaze
-        updatePhotoTexture()   // 貼紙的底色是釉色，換釉色要重畫
         refreshMaterials()
     }
 
     func setPhoto(_ image: UIImage?) {
         photo = image
-        updatePhotoTexture()
+        photoTexture = image.flatMap(Self.photoTexture)
         refreshMaterials()
     }
 
-    /// 貼紙的畫布：釉色底，照片放在正中央（最長邊佔畫布的一半）。
-    /// 畫布整張對應的實際邊長 = 照片最長邊的 2 倍，大小由網格的 UV 縮放決定，所以調大小不用重畫
-    private func updatePhotoTexture() {
-        guard let photo, let image = Self.stickerImage(photo: photo, background: glaze.color) else {
-            photoTexture = nil
-            return
-        }
-        photoTexture = try? TextureResource.generate(from: image, options: .init(semantic: .color))
-    }
-
-    private static func stickerImage(photo: UIImage, background: UIColor) -> CGImage? {
-        let side: CGFloat = 2048
+    /// 照片整張當作一塊「拼磚」。先重畫一次，把照片的方向（EXIF）轉正；縮到最長邊 1024 以內。
+    /// 之後網格的 UV 會讓這塊磚重複拼貼，張數由陶器的 UV 決定，改張數不用重畫貼圖
+    private static func photoTexture(_ photo: UIImage) -> TextureResource? {
+        let scale = min(1, 1024 / max(max(photo.size.width, photo.size.height), 1))
+        let size = CGSize(width: max(photo.size.width * scale, 1), height: max(photo.size.height * scale, 1))
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format)
-        let image = renderer.image { context in
-            background.setFill()
-            context.fill(CGRect(x: 0, y: 0, width: side, height: side))
-            let longest = side / 2
-            let aspect = photo.size.width / max(photo.size.height, 1)
-            let width = aspect >= 1 ? longest : longest * aspect
-            let height = aspect >= 1 ? longest / aspect : longest
-            photo.draw(in: CGRect(x: (side - width) / 2, y: (side - height) / 2, width: width, height: height))
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            photo.draw(in: CGRect(origin: .zero, size: size))
         }
-        return image.cgImage
+        guard let cgImage = image.cgImage else { return nil }
+        return try? TextureResource.generate(from: cgImage, options: .init(semantic: .color))
     }
 
     func setPattern(_ pattern: PotteryModel.Pattern) {
@@ -371,27 +361,22 @@ final class PotteryScene {
             return [r * x, t * height, -r * y]
         }
 
-        // 照片貼紙用的量：外輪廓周長、沿陶壁從底往上量的長度、貼紙中心的位置、畫布實際邊長
-        let perimeterUnit: Float = spec.sides == 0 ? 2 * .pi : Float(spec.sides) * 2 * sin(.pi / Float(spec.sides))
+        // 照片拼貼用的量：沿陶壁從底往上量的長度（占全長的比例決定 v）
         var profileLength = [Float](repeating: 0, count: layers)
         for i in 1..<layers {
             let dr = spec.radii[i] - spec.radii[i - 1]
             let dy = height / Float(layers - 1)
             profileLength[i] = profileLength[i - 1] + (dr * dr + dy * dy).squareRoot()
         }
-        let centerLayer = (spec.sticker?.height ?? 0.5) * Float(layers - 1)
-        let lower = min(Int(centerLayer), layers - 2)
-        let centerLength = profileLength[lower] + (profileLength[lower + 1] - profileLength[lower]) * (centerLayer - Float(lower))
-        let canvas = (spec.sticker?.size ?? 0.1) * 2
+        let totalLength = max(profileLength[layers - 1], 1e-6)
 
-        func uv(_ column: Int, _ layer: Int, scale: Float) -> SIMD2<Float> {
-            guard spec.sticker != nil else {
+        func uv(_ column: Int, _ layer: Int) -> SIMD2<Float> {
+            guard let tiles = spec.tiles else {
                 return [columns[column].patternU, Float(layer) / Float(layers - 1)]
             }
-            // 貼紙範圍外（超出畫布）一律取畫布邊緣的釉色
-            let arc = (columns[column].t - 0.5) * perimeterUnit * spec.radii[layer] * scale
-            let along = (profileLength[layer] - centerLength) * scale
-            return [min(max(0.5 + arc / canvas, 0), 1), min(max(0.5 + along / canvas, 0), 1)]   // RealityKit 的 v = 0 在貼圖下緣
+            // 整數拼貼：u 繞一圈剛好 around 張（t 在接縫是 0 與 1，所以頭尾剛好接上），
+            // v 從底到口剛好 up 張。v 往上增加：RealityKit 的 v = 0 在貼圖下緣
+            return [columns[column].t * Float(tiles.around), profileLength[layer] / totalLength * Float(tiles.up)]
         }
 
         /// 三角形的順序依「想朝向的方向」自動決定（逆時針為正面）
@@ -423,7 +408,7 @@ final class PotteryScene {
                     if (dot(n, radial) >= 0) != facingOutward { n = -n }
                     positions.append(p)
                     normals.append(n)
-                    uvs.append(uv(c, i, scale: scale))
+                    uvs.append(uv(c, i))
                 }
             }
             for c0 in strips {
@@ -440,7 +425,6 @@ final class PotteryScene {
         addWall(scale: wall, facingOutward: false)
 
         // 口沿：頂層外壁與內壁之間的一圈平面，朝上
-        let flat: SIMD2<Float> = [0, 0]   // 貼紙模式下，口沿與底面取畫布角落的釉色
         for c0 in strips {
             let c1 = c0 + 1
             let top = layers - 1
@@ -452,7 +436,7 @@ final class PotteryScene {
             for corner in corners {
                 positions.append(corner)
                 normals.append([0, 1, 0])
-                uvs.append(spec.sticker != nil ? flat : [(columns[c0].patternU + columns[c1].patternU) / 2, 1])
+                uvs.append([(columns[c0].patternU + columns[c1].patternU) / 2, 1])
             }
             addTriangle(first, first + 1, first + 2, facing: [0, 1, 0])
             addTriangle(first, first + 2, first + 3, facing: [0, 1, 0])
@@ -464,13 +448,13 @@ final class PotteryScene {
             let extent = max(spec.radii[0] * scale, 0.001)
             positions.append([0, y, 0])
             normals.append(facing)
-            uvs.append(spec.sticker != nil ? flat : [0.5, 0.5])
+            uvs.append([0.5, 0.5])
             for c in columns.indices {
                 var p = point(c, 0, scale: scale)
                 p.y = y
                 positions.append(p)
                 normals.append(facing)
-                uvs.append(spec.sticker != nil ? flat : [0.5 + 0.5 * p.x / extent, 0.5 + 0.5 * p.z / extent])
+                uvs.append([0.5 + 0.5 * p.x / extent, 0.5 + 0.5 * p.z / extent])
             }
             for c0 in strips {
                 addTriangle(first, first + 1 + c0, first + 2 + c0, facing: facing)

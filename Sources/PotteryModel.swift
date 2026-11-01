@@ -17,16 +17,16 @@ final class PotteryModel {
     private(set) var baseShape: BaseShape = .circle
     private(set) var twist: Float = 0
     private(set) var pattern: Pattern = .stripes
-    /// 貼在陶器上的照片（只有「照片」花紋會用到）。大小是照片最長邊的實際長度（公尺），
-    /// 高度是貼紙中心在陶器上的位置（0 底、1 口）
+    /// 貼滿陶器外面的照片（只有「照片」花紋會用到）。照片會被縮放成「繞一圈 tilesAround 張、
+    /// 從底到口 tilesUp 張」，張數都是整數，所以四方連續的圖案接得起來
     private(set) var photo: UIImage?
-    private(set) var stickerSize: Float = 0.10
-    private(set) var stickerHeight: Float = 0.5
+    private(set) var tilesAround = 4
+    private(set) var tilesUp = 2
 
     /// 重新擠出陶器所需的全部資料
     var spec: VesselSpec {
-        let sticker = (pattern == .photo && photo != nil) ? StickerSpec(size: stickerSize, height: stickerHeight) : nil
-        return VesselSpec(radii: radii, sides: baseShape.sides, twist: twist, sticker: sticker)
+        let tiles = (pattern == .photo && photo != nil) ? TileSpec(around: tilesAround, up: tilesUp) : nil
+        return VesselSpec(radii: radii, sides: baseShape.sides, twist: twist, tiles: tiles)
     }
     var mode: Mode = .sculpt
     var showWireframe = false
@@ -42,8 +42,8 @@ final class PotteryModel {
         var baseShape: BaseShape
         var twist: Float
         var pattern: Pattern
-        var stickerSize: Float
-        var stickerHeight: Float
+        var tilesAround: Int
+        var tilesUp: Int
     }
 
     private static let historyLimit = 60
@@ -57,7 +57,7 @@ final class PotteryModel {
 
     private var snapshot: Snapshot {
         Snapshot(radii: radii, glaze: glaze, baseShape: baseShape, twist: twist, pattern: pattern,
-                 stickerSize: stickerSize, stickerHeight: stickerHeight)
+                 tilesAround: tilesAround, tilesUp: tilesUp)
     }
 
     private func restore(_ s: Snapshot) {
@@ -66,8 +66,8 @@ final class PotteryModel {
         baseShape = s.baseShape
         twist = s.twist
         pattern = s.pattern
-        stickerSize = s.stickerSize
-        stickerHeight = s.stickerHeight
+        tilesAround = s.tilesAround
+        tilesUp = s.tilesUp
     }
 
     private func record(_ before: Snapshot) {
@@ -101,16 +101,45 @@ final class PotteryModel {
             pattern = .photo
         }
         photo = image
+        if image != nil {
+            tilesAround = 4
+            refitTiles()
+        }
     }
 
-    func setStickerSize(_ value: Float) {
+    static let maxTiles = 12
+
+    func setTilesAround(_ value: Int) {
         commitStrokeStart()
-        stickerSize = min(max(value, 0.04), 0.22)
+        tilesAround = min(max(value, 1), Self.maxTiles)
     }
 
-    func setStickerHeight(_ value: Float) {
+    func setTilesUp(_ value: Int) {
         commitStrokeStart()
-        stickerHeight = min(max(value, 0), 1)
+        tilesUp = min(max(value, 1), Self.maxTiles)
+    }
+
+    /// 「自動比例」按鈕：依目前的陶器形狀，挑上下的張數，讓每一張的長寬比最接近照片原本的比例
+    func fitTilesToPhoto() {
+        record(snapshot)
+        refitTiles()
+    }
+
+    private func refitTiles() {
+        guard let photo, photo.size.height > 0 else { return }
+        let aspect = Float(photo.size.width / photo.size.height)
+        let sides = baseShape.sides
+        let perimeterUnit: Float = sides == 0 ? 2 * .pi : Float(sides) * 2 * sin(.pi / Float(sides))
+        let meanCircumference = radii.reduce(0, +) / Float(radii.count) * perimeterUnit
+        var profileLength: Float = 0
+        for i in 1..<radii.count {
+            let dr = radii[i] - radii[i - 1]
+            let dy = Self.height / Float(radii.count - 1)
+            profileLength += (dr * dr + dy * dy).squareRoot()
+        }
+        let tileWidth = meanCircumference / Float(tilesAround)
+        let tileHeight = tileWidth / aspect
+        tilesUp = min(max(Int((profileLength / tileHeight).rounded()), 1), Self.maxTiles)
     }
 
     func setPattern(_ newPattern: Pattern) {
@@ -341,13 +370,13 @@ struct VesselSpec: Equatable {
     var radii: [Float]
     var sides: Int
     var twist: Float
-    var sticker: StickerSpec?
+    var tiles: TileSpec?
 }
 
-/// 貼在陶器上的照片：大小與高度改變時，網格的 UV 要重算
-struct StickerSpec: Equatable {
-    var size: Float
-    var height: Float
+/// 照片拼貼：繞一圈、從底到口各幾張（整數）。張數改變時，網格的 UV 要重算
+struct TileSpec: Equatable {
+    var around: Int
+    var up: Int
 }
 
 /// 相機繞著陶器轉：yaw 水平角、pitch 仰角（往下看為正）、distance 距離（公尺）
