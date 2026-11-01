@@ -8,7 +8,9 @@ final class PotteryModel {
     static let sliceCount = 48
     static let height: Float = 0.3
     static let minRadius: Float = 0.01
-    static let maxRadius: Float = 0.3
+    static let maxRadius: Float = 0.28
+    /// 轉盤的半徑：比陶器最大的半徑再寬一點點，畫面才不會被空蕩蕩的轉盤佔滿
+    static let turntableRadius: Float = 0.30
     /// 從底到口最多扭轉的角度（弧度），正負各一圈
     static let maxTwist: Float = 2 * .pi
 
@@ -386,7 +388,9 @@ struct CameraPose: Equatable {
     var distance: Float
 
     static let maxPitch: Float = 1.5   // 約 86°，再高就和向上的方向重疊
-    static let start = CameraPose(yaw: 0, pitch: 0.5, distance: 1.0)
+    /// 預設的相機距離（公尺）。轉盤縮小之後，可以靠得比較近，預設的陶器在畫面裡就比較大
+    static let defaultDistance: Float = 0.82
+    static let start = CameraPose(yaw: 0, pitch: 0.5, distance: defaultDistance)
 
     enum Preset: CaseIterable, Identifiable {
         case front, side, top, solid
@@ -413,10 +417,10 @@ struct CameraPose: Equatable {
 
         var pose: CameraPose {
             switch self {
-            case .front: CameraPose(yaw: 0, pitch: 0, distance: 1.0)
-            case .side: CameraPose(yaw: .pi / 2, pitch: 0, distance: 1.0)
-            case .top: CameraPose(yaw: 0, pitch: maxPitch, distance: 1.0)
-            case .solid: CameraPose(yaw: 0.6, pitch: 0.5, distance: 1.0)
+            case .front: CameraPose(yaw: 0, pitch: 0, distance: defaultDistance)
+            case .side: CameraPose(yaw: .pi / 2, pitch: 0, distance: defaultDistance)
+            case .top: CameraPose(yaw: 0, pitch: maxPitch, distance: defaultDistance)
+            case .solid: CameraPose(yaw: 0.6, pitch: 0.5, distance: defaultDistance)
             }
         }
     }

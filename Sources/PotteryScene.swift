@@ -50,14 +50,14 @@ final class PotteryScene {
 
         // 轉盤：自己組網格，頂面貼放射狀線條的貼圖，轉動時才看得出來在轉
         let disc: ModelEntity
-        if let mesh = Self.makeTurntableMesh(radius: 0.34, thickness: 0.03), let texture = Self.turntableTexture() {
+        if let mesh = Self.makeTurntableMesh(radius: PotteryModel.turntableRadius, thickness: 0.03), let texture = Self.turntableTexture() {
             disc = ModelEntity(
                 mesh: mesh,
                 materials: [Self.makeMaterial(color: .white, glazed: false, wireframe: false, texture: texture)]
             )
         } else {
             disc = ModelEntity(
-                mesh: .generateCylinder(height: 0.03, radius: 0.34),
+                mesh: .generateCylinder(height: 0.03, radius: PotteryModel.turntableRadius),
                 materials: [Self.makeMaterial(color: UIColor(white: 0.72, alpha: 1), glazed: false, wireframe: false, texture: nil)]
             )
             disc.position.y = -0.015
