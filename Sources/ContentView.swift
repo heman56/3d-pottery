@@ -1,5 +1,6 @@
 import SwiftUI
 import RealityKit
+import PhotosUI
 
 struct ContentView: View {
     @State private var model = PotteryModel()
@@ -11,6 +12,7 @@ struct ContentView: View {
     @State private var viewHeight: CGFloat = 0
     @State private var headerFrame = CGRect.zero
     @State private var controlsFrame = CGRect.zero
+    @State private var pickedItem: PhotosPickerItem?
 
     private static let brown = Color(red: 0.45, green: 0.25, blue: 0.12)
 
@@ -28,6 +30,8 @@ struct ContentView: View {
             .simultaneousGesture(zoomGesture)
             .onChange(of: model.spec) { scene.rebuild(model.spec) }
             .onChange(of: model.pattern) { scene.setPattern(model.pattern) }
+            .onChange(of: model.photo) { scene.setPhoto(model.photo) }
+            .onChange(of: pickedItem) { loadPickedPhoto() }
             .onChange(of: model.glaze) { scene.setGlaze(model.glaze) }
             .onChange(of: model.showWireframe) { scene.setWireframe(model.showWireframe) }
             .onChange(of: model.camera) { scene.setCamera(model.camera) }
@@ -78,6 +82,25 @@ struct ContentView: View {
     private func updateInsets() {
         guard viewHeight > 0, controlsFrame.height > 0 else { return }
         scene.setInsets(top: headerFrame.maxY, bottom: viewHeight - controlsFrame.minY)
+    }
+
+    /// 把選到的照片讀進來。先縮到最長邊 1024 以內，省記憶體；照片只留在這台裝置上
+    private func loadPickedPhoto() {
+        guard let item = pickedItem else { return }
+        Task {
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else { return }
+            let longest = max(image.size.width, image.size.height)
+            let scale = min(1, 1024 / max(longest, 1))
+            let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            let resized = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: size))
+            }
+            model.setPhoto(resized)
+            pickedItem = nil
+        }
     }
 
     private var hint: String {
@@ -138,6 +161,38 @@ struct ContentView: View {
     }
 
     // MARK: 控制列
+
+    /// 「照片」花紋的設定：選照片、調大小與高度（照片像貼紙貼一次，大小是最長邊的實際長度）
+    private var photoControls: some View {
+        VStack(spacing: 6) {
+            PhotosPicker(selection: $pickedItem, matching: .images) {
+                Label(model.photo == nil ? "選擇照片" : "換一張照片", systemImage: "photo.on.rectangle")
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 40)
+                    .background(Capsule().fill(Color(red: 0.62, green: 0.38, blue: 0.22)))
+            }
+            if model.photo != nil {
+                stickerSlider("大小", value: model.stickerSize, range: 0.04...0.22) { model.setStickerSize($0) }
+                stickerSlider("高度", value: model.stickerHeight, range: 0...1) { model.setStickerHeight($0) }
+            }
+        }
+    }
+
+    private func stickerSlider(_ title: String, value: Float, range: ClosedRange<Float>,
+                               set: @escaping (Float) -> Void) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                .foregroundStyle(Self.brown)
+                .frame(width: 44, alignment: .leading)
+            Slider(value: Binding(get: { value }, set: set), in: range) { editing in
+                if editing { model.beginStroke() } else { model.endStroke() }
+            }
+            .tint(Self.brown)
+        }
+    }
 
     private var controls: some View {
         VStack(spacing: 10) {
@@ -218,6 +273,10 @@ struct ContentView: View {
                 }
             }
             .pickerStyle(.segmented)
+
+            if model.pattern == .photo {
+                photoControls
+            }
 
             HStack(spacing: 12) {
                 ForEach(PotteryModel.Glaze.allCases) { glaze in

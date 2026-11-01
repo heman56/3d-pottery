@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 陶器的資料：從底到口每一層的外半徑（公尺）、底面形狀、扭轉角度與釉色。
 /// 「半徑」一律指底面的外接圓半徑（正多邊形的中心到頂點，正方形就是對角線的一半）
@@ -16,9 +17,17 @@ final class PotteryModel {
     private(set) var baseShape: BaseShape = .circle
     private(set) var twist: Float = 0
     private(set) var pattern: Pattern = .stripes
+    /// 貼在陶器上的照片（只有「照片」花紋會用到）。大小是照片最長邊的實際長度（公尺），
+    /// 高度是貼紙中心在陶器上的位置（0 底、1 口）
+    private(set) var photo: UIImage?
+    private(set) var stickerSize: Float = 0.10
+    private(set) var stickerHeight: Float = 0.5
 
     /// 重新擠出陶器所需的全部資料
-    var spec: VesselSpec { VesselSpec(radii: radii, sides: baseShape.sides, twist: twist) }
+    var spec: VesselSpec {
+        let sticker = (pattern == .photo && photo != nil) ? StickerSpec(size: stickerSize, height: stickerHeight) : nil
+        return VesselSpec(radii: radii, sides: baseShape.sides, twist: twist, sticker: sticker)
+    }
     var mode: Mode = .sculpt
     var showWireframe = false
     var camera = CameraPose.start
@@ -33,6 +42,8 @@ final class PotteryModel {
         var baseShape: BaseShape
         var twist: Float
         var pattern: Pattern
+        var stickerSize: Float
+        var stickerHeight: Float
     }
 
     private static let historyLimit = 60
@@ -45,7 +56,8 @@ final class PotteryModel {
     var canRedo: Bool { !redoStack.isEmpty }
 
     private var snapshot: Snapshot {
-        Snapshot(radii: radii, glaze: glaze, baseShape: baseShape, twist: twist, pattern: pattern)
+        Snapshot(radii: radii, glaze: glaze, baseShape: baseShape, twist: twist, pattern: pattern,
+                 stickerSize: stickerSize, stickerHeight: stickerHeight)
     }
 
     private func restore(_ s: Snapshot) {
@@ -54,6 +66,8 @@ final class PotteryModel {
         baseShape = s.baseShape
         twist = s.twist
         pattern = s.pattern
+        stickerSize = s.stickerSize
+        stickerHeight = s.stickerHeight
     }
 
     private func record(_ before: Snapshot) {
@@ -78,6 +92,25 @@ final class PotteryModel {
         guard newGlaze != glaze else { return }
         record(snapshot)
         glaze = newGlaze
+    }
+
+    /// 選了照片就自動切到「照片」花紋（照片本身不進復原紀錄，太大）
+    func setPhoto(_ image: UIImage?) {
+        if image != nil, pattern != .photo {
+            record(snapshot)
+            pattern = .photo
+        }
+        photo = image
+    }
+
+    func setStickerSize(_ value: Float) {
+        commitStrokeStart()
+        stickerSize = min(max(value, 0.04), 0.22)
+    }
+
+    func setStickerHeight(_ value: Float) {
+        commitStrokeStart()
+        stickerHeight = min(max(value, 0), 1)
     }
 
     func setPattern(_ newPattern: Pattern) {
@@ -242,7 +275,7 @@ final class PotteryModel {
 
     /// 釉面上的花紋。貼圖由程式畫出，再乘上釉色
     enum Pattern: CaseIterable, Identifiable, Hashable {
-        case stripes, checker, dots, waves
+        case stripes, checker, dots, waves, photo
 
         var id: Self { self }
 
@@ -252,6 +285,7 @@ final class PotteryModel {
             case .checker: "方格"
             case .dots: "圓點"
             case .waves: "波浪"
+            case .photo: "照片"
             }
         }
     }
@@ -307,6 +341,13 @@ struct VesselSpec: Equatable {
     var radii: [Float]
     var sides: Int
     var twist: Float
+    var sticker: StickerSpec?
+}
+
+/// 貼在陶器上的照片：大小與高度改變時，網格的 UV 要重算
+struct StickerSpec: Equatable {
+    var size: Float
+    var height: Float
 }
 
 /// 相機繞著陶器轉：yaw 水平角、pitch 仰角（往下看為正）、distance 距離（公尺）
