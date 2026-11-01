@@ -25,11 +25,11 @@ final class PotteryScene {
     private var currentPose = CameraPose.start
     private var targetPose = CameraPose.start
 
-    private var pending: [Float]?
+    private var pending: VesselSpec?
     private var isBuilding = false
 
     private static let baseThickness: Float = 0.012
-    private static let wall: Float = 0.88   // 內圓半徑 / 外圓半徑
+    private static let wall: Float = 0.88   // 內框 / 外框 的大小比例
     private static let lookAt: SIMD3<Float> = [0, 0.12, 0]
 
     /// 只在模擬器使用（見 rebuild）
@@ -41,7 +41,7 @@ final class PotteryScene {
 
         // 轉盤
         let disc = ModelEntity(
-            mesh: .generateCylinder(height: 0.03, radius: 0.28),
+            mesh: .generateCylinder(height: 0.03, radius: 0.34),
             materials: [Self.makeMaterial(color: UIColor(white: 0.72, alpha: 1), glazed: false, wireframe: false)]
         )
         disc.position.y = -0.015
@@ -50,14 +50,14 @@ final class PotteryScene {
         // 擠出的方向是 Z 軸，轉成朝上（Y 軸）
         pot.orientation = simd_quatf(angle: -.pi / 2, axis: [1, 0, 0])
         turntable.addChild(pot)
-        turntable.addChild(base)
+        pot.addChild(base)   // 底板和陶器共用同一個「Z 軸朝上」的座標
+        base.position.z = Self.baseThickness / 2   // 線性擠出是以原點為中心，上移後底面剛好貼在轉盤上
         root.addChild(turntable)
 
         root.addChild(camera)
         applyCamera()
 
         #if targetEnvironment(simulator)
-        cavity.position.y = PotteryModel.height - 0.002
         turntable.addChild(cavity)
         #else
         // 主光：從右上前方打來，產生柔和的陰影
@@ -172,46 +172,100 @@ final class PotteryScene {
     }
 
     /// 重新擠出陶器。連續拖曳時只保留最新的一份，避免排隊
-    func rebuild(radii: [Float]) async {
-        pending = radii
+    func rebuild(_ spec: VesselSpec) async {
+        pending = spec
         guard !isBuilding else { return }
         isBuilding = true
         defer { isBuilding = false }
 
         while let next = pending {
             pending = nil
-            guard let mesh = try? await Self.makeVessel(radii: next) else { continue }
+            guard let mesh = try? await Self.makeVessel(next) else { continue }
             pot.model = ModelComponent(mesh: mesh, materials: [material])
-            let bottom = MeshResource.generateCylinder(height: Self.baseThickness, radius: next[0])
-            base.model = ModelComponent(mesh: bottom, materials: [material])
-            base.position.y = Self.baseThickness / 2
+
+            if let bottom = try? await Self.makeBase(next) {
+                base.model = ModelComponent(mesh: bottom, materials: [material])
+            }
 
             #if targetEnvironment(simulator)
-            // 模擬器沒有光影，用一片深色圓盤假裝容器開口的陰暗內側
-            let opening = next[next.count - 1] * Self.wall * 0.98
-            cavity.model = ModelComponent(
-                mesh: .generateCylinder(height: 0.0005, radius: opening),
-                materials: [cavityMaterial]
-            )
+            // 模擬器沒有光影，用一片深色的同形狀薄片假裝容器開口的陰暗內側
+            if let cap = Self.makeCap(next) {
+                cavity.model = ModelComponent(mesh: cap, materials: [cavityMaterial])
+            }
             #endif
         }
     }
 
-    /// 擠出成型：同心圓(空心)沿 Z 軸一層層串起來，每層用縮放決定半徑
-    private static func makeVessel(radii: [Float]) async throws -> MeshResource {
-        let wall = CGFloat(Self.wall)
-        // 外圓與內圓繞行方向相反，不論用哪種填色規則，中間都會是空的
-        var shape = Path()
-        shape.addArc(center: .zero, radius: 1, startAngle: .zero, endAngle: .degrees(360), clockwise: false)
-        shape.addArc(center: .zero, radius: wall, startAngle: .zero, endAngle: .degrees(360), clockwise: true)
+    // MARK: 幾何
 
-        let n = radii.count
+    /// 第 k 個頂點的角度。圓（sides = 0）取 count 個點；
+    /// 多邊形讓底邊朝下、三角形尖角朝上，四方形的邊與座標軸平行
+    private static func vertexAngle(_ k: Int, sides: Int, count: Int) -> Double {
+        let n = Double(count)
+        if sides == 0 { return 2 * .pi * Double(k) / n }
+        return 2 * .pi * Double(k) / n + .pi / n - .pi / 2
+    }
+
+    /// 以「外接圓半徑」為準的底面輪廓；reversed 代表反向繞行，用來挖出空心
+    private static func outline(sides: Int, radius: CGFloat, reversed: Bool) -> Path {
+        var path = Path()
+        if sides == 0 {
+            path.addArc(center: .zero, radius: radius, startAngle: .zero, endAngle: .degrees(360), clockwise: reversed)
+            return path
+        }
+        let points = (0..<sides).map { k -> CGPoint in
+            let a = vertexAngle(k, sides: sides, count: sides)
+            return CGPoint(x: radius * cos(a), y: radius * sin(a))
+        }
+        path.addLines(reversed ? points.reversed() : points)
+        path.closeSubpath()
+        return path
+    }
+
+    /// 擠出成型：外框與內框（反向繞行，所以中間是空的）沿 Z 軸一層層串起來，
+    /// 每層用位移決定高度、縮放決定半徑、繞 Z 軸旋轉決定扭轉
+    private static func makeVessel(_ spec: VesselSpec) async throws -> MeshResource {
+        var shape = outline(sides: spec.sides, radius: 1, reversed: false)
+        shape.addPath(outline(sides: spec.sides, radius: CGFloat(wall), reversed: true))
+
+        let n = spec.radii.count
         let matrices = (0..<n).map { i -> simd_float4x4 in
-            let z = Float(i) / Float(n - 1) * PotteryModel.height
-            return Transform(scale: [radii[i], radii[i], 1], translation: [0, 0, z]).matrix
+            let t = Float(i) / Float(n - 1)
+            return Transform(
+                scale: [spec.radii[i], spec.radii[i], 1],
+                rotation: simd_quatf(angle: spec.twist * t, axis: [0, 0, 1]),
+                translation: [0, 0, t * PotteryModel.height]
+            ).matrix
         }
         var options = MeshResource.ShapeExtrusionOptions()
         options.extrusionMethod = .traceTransforms(matrices)
         return try await MeshResource(extruding: shape, extrusionOptions: options)
+    }
+
+    /// 封住底部的薄板（形狀與最底層相同）
+    private static func makeBase(_ spec: VesselSpec) async throws -> MeshResource {
+        var options = MeshResource.ShapeExtrusionOptions()
+        options.extrusionMethod = .linear(depth: baseThickness)
+        let path = outline(sides: spec.sides, radius: CGFloat(spec.radii[0]), reversed: false)
+        return try await MeshResource(extruding: path, extrusionOptions: options)
+    }
+
+    /// 模擬器專用：蓋在開口上的深色薄片（世界座標，已含頂層的扭轉角度）
+    private static func makeCap(_ spec: VesselSpec) -> MeshResource? {
+        let count = spec.sides == 0 ? 48 : spec.sides
+        let radius = spec.radii[spec.radii.count - 1] * wall * 0.98
+        let y = PotteryModel.height - 0.002
+        var positions: [SIMD3<Float>] = [[0, y, 0]]
+        var indices: [UInt32] = []
+        for k in 0..<count {
+            // 陶器節點繞 X 軸轉了 -90°，所以局部的 (x, y) 對應世界的 (x, -z)
+            let a = Float(vertexAngle(k, sides: spec.sides, count: count)) + spec.twist
+            positions.append([radius * cos(a), y, -radius * sin(a)])
+            indices += [0, UInt32(1 + k), UInt32(1 + (k + 1) % count)]
+        }
+        var descriptor = MeshDescriptor(name: "cap")
+        descriptor.positions = MeshBuffer(positions)
+        descriptor.primitives = .triangles(indices)
+        return try? MeshResource.generate(from: [descriptor])
     }
 }

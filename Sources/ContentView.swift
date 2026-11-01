@@ -17,12 +17,12 @@ struct ContentView: View {
                 content.add(scene.root)
                 scene.start(in: content)
                 scene.setGlaze(model.glaze)
-                await scene.rebuild(radii: model.radii)
+                await scene.rebuild(model.spec)
             }
             .gesture(dragGesture)
             .simultaneousGesture(zoomGesture)
-            .onChange(of: model.radii) {
-                Task { await scene.rebuild(radii: model.radii) }
+            .onChange(of: model.spec) {
+                Task { await scene.rebuild(model.spec) }
             }
             .onChange(of: model.glaze) { scene.setGlaze(model.glaze) }
             .onChange(of: model.showWireframe) { scene.setWireframe(model.showWireframe) }
@@ -134,6 +134,30 @@ struct ContentView: View {
                 }
             }
 
+            Picker("底面", selection: Binding(
+                get: { model.baseShape },
+                set: { model.setBaseShape($0) }
+            )) {
+                ForEach(PotteryModel.BaseShape.allCases) { shape in
+                    Text(shape.title).tag(shape)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            HStack(spacing: 10) {
+                Text("扭轉 \(Int((model.twist * 180 / .pi).rounded()))°")
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundStyle(Self.brown)
+                    .frame(width: 88, alignment: .leading)
+                Slider(
+                    value: Binding(get: { model.twist }, set: { model.setTwist($0) }),
+                    in: -PotteryModel.maxTwist...PotteryModel.maxTwist
+                ) { editing in
+                    if editing { model.beginStroke() } else { model.endStroke() }
+                }
+                .tint(Self.brown)
+            }
+
             HStack(spacing: 12) {
                 ForEach(PotteryModel.Glaze.allCases) { glaze in
                     Button {
@@ -150,6 +174,7 @@ struct ContentView: View {
             }
         }
         .padding(14)
+        .frame(maxWidth: 480)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28))
     }
 }

@@ -1,15 +1,23 @@
 import SwiftUI
 
-/// 陶器的資料：從底到口每一層的外半徑（公尺）與釉色
+/// 陶器的資料：從底到口每一層的外半徑（公尺）、底面形狀、扭轉角度與釉色。
+/// 「半徑」一律指底面的外接圓半徑（正多邊形的中心到頂點，正方形就是對角線的一半）
 @Observable
 final class PotteryModel {
-    static let sliceCount = 32
+    static let sliceCount = 48
     static let height: Float = 0.3
-    static let minRadius: Float = 0.05
-    static let maxRadius: Float = 0.2
+    static let minRadius: Float = 0.01
+    static let maxRadius: Float = 0.3
+    /// 從底到口最多扭轉的角度（弧度），正負各一圈
+    static let maxTwist: Float = 2 * .pi
 
     var radii: [Float] = Preset.clay.radii
     private(set) var glaze: Glaze = .clay
+    private(set) var baseShape: BaseShape = .circle
+    private(set) var twist: Float = 0
+
+    /// 重新擠出陶器所需的全部資料
+    var spec: VesselSpec { VesselSpec(radii: radii, sides: baseShape.sides, twist: twist) }
     var mode: Mode = .sculpt
     var showWireframe = false
     var camera = CameraPose.start
@@ -21,6 +29,8 @@ final class PotteryModel {
     private struct Snapshot {
         var radii: [Float]
         var glaze: Glaze
+        var baseShape: BaseShape
+        var twist: Float
     }
 
     private static let historyLimit = 60
@@ -32,7 +42,16 @@ final class PotteryModel {
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
 
-    private var snapshot: Snapshot { Snapshot(radii: radii, glaze: glaze) }
+    private var snapshot: Snapshot {
+        Snapshot(radii: radii, glaze: glaze, baseShape: baseShape, twist: twist)
+    }
+
+    private func restore(_ s: Snapshot) {
+        radii = s.radii
+        glaze = s.glaze
+        baseShape = s.baseShape
+        twist = s.twist
+    }
 
     private func record(_ before: Snapshot) {
         undoStack.append(before)
@@ -43,15 +62,13 @@ final class PotteryModel {
     func undo() {
         guard let previous = undoStack.popLast() else { return }
         redoStack.append(snapshot)
-        radii = previous.radii
-        glaze = previous.glaze
+        restore(previous)
     }
 
     func redo() {
         guard let next = redoStack.popLast() else { return }
         undoStack.append(snapshot)
-        radii = next.radii
-        glaze = next.glaze
+        restore(next)
     }
 
     func setGlaze(_ newGlaze: Glaze) {
@@ -60,8 +77,28 @@ final class PotteryModel {
         glaze = newGlaze
     }
 
+    func setBaseShape(_ shape: BaseShape) {
+        guard shape != baseShape else { return }
+        record(snapshot)
+        baseShape = shape
+    }
+
+    /// 扭轉滑桿：拖一次算一步
+    func setTwist(_ value: Float) {
+        commitStrokeStart()
+        twist = min(max(value, -Self.maxTwist), Self.maxTwist)
+    }
+
     func beginStroke() { strokeStart = snapshot }
     func endStroke() { strokeStart = nil }
+
+    /// 這一筆第一次真的改到東西時，才把筆畫開始前的樣子存進復原紀錄
+    private func commitStrokeStart() {
+        if let start = strokeStart {
+            record(start)
+            strokeStart = nil
+        }
+    }
 
     // MARK: 相機
 
@@ -72,7 +109,7 @@ final class PotteryModel {
     }
 
     func zoom(to distance: Float) {
-        camera.distance = min(max(distance, 0.45), 1.8)
+        camera.distance = min(max(distance, 0.45), 2.0)
     }
 
     func setView(_ preset: CameraPose.Preset) {
@@ -88,17 +125,15 @@ final class PotteryModel {
 
     /// 手指推到某個高度與半徑，周圍幾層會跟著平滑變形
     func sculpt(atHeight y: Float, radius: Float) {
-        if let start = strokeStart {
-            record(start)
-            strokeStart = nil
-        }
+        commitStrokeStart()
         let n = Self.sliceCount
         let center = y / Self.height * Float(n - 1)
         let target = min(max(radius, Self.minRadius), Self.maxRadius)
         var next = radii
         for i in 0..<n {
-            let d = Float(i) - center
-            let weight = exp(-d * d / 8)   // 影響範圍約 ±3 層
+            // 層數改變時，筆刷的實際寬度（約 ±3 公分）維持不變
+            let d = (Float(i) - center) * 31 / Float(n - 1)
+            let weight = exp(-d * d / 8)
             if weight > 0.02 {
                 next[i] = radii[i] + (target - radii[i]) * weight
             }
@@ -159,6 +194,31 @@ final class PotteryModel {
         }
     }
 
+    /// 底面的形狀。sides = 0 代表圓，其餘是正多邊形的邊數
+    enum BaseShape: CaseIterable, Identifiable {
+        case circle, triangle, square, hexagon
+
+        var id: Self { self }
+
+        var sides: Int {
+            switch self {
+            case .circle: 0
+            case .triangle: 3
+            case .square: 4
+            case .hexagon: 6
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .circle: "圓形"
+            case .triangle: "三角"
+            case .square: "四方"
+            case .hexagon: "六角"
+            }
+        }
+    }
+
     enum Glaze: CaseIterable, Identifiable {
         case clay, red, blue, green, yellow, white
 
@@ -180,6 +240,13 @@ final class PotteryModel {
     }
 }
 
+/// 擠出一件陶器所需的資料（相同就不用重建）
+struct VesselSpec: Equatable {
+    var radii: [Float]
+    var sides: Int
+    var twist: Float
+}
+
 /// 相機繞著陶器轉：yaw 水平角、pitch 仰角（往下看為正）、distance 距離（公尺）
 struct CameraPose: Equatable {
     var yaw: Float
@@ -187,7 +254,7 @@ struct CameraPose: Equatable {
     var distance: Float
 
     static let maxPitch: Float = 1.5   // 約 86°，再高就和向上的方向重疊
-    static let start = CameraPose(yaw: 0, pitch: 0.5, distance: 0.92)
+    static let start = CameraPose(yaw: 0, pitch: 0.5, distance: 1.0)
 
     enum Preset: CaseIterable, Identifiable {
         case front, side, top, solid
@@ -214,10 +281,10 @@ struct CameraPose: Equatable {
 
         var pose: CameraPose {
             switch self {
-            case .front: CameraPose(yaw: 0, pitch: 0, distance: 0.92)
-            case .side: CameraPose(yaw: .pi / 2, pitch: 0, distance: 0.92)
-            case .top: CameraPose(yaw: 0, pitch: maxPitch, distance: 0.92)
-            case .solid: CameraPose(yaw: 0.6, pitch: 0.5, distance: 0.92)
+            case .front: CameraPose(yaw: 0, pitch: 0, distance: 1.0)
+            case .side: CameraPose(yaw: .pi / 2, pitch: 0, distance: 1.0)
+            case .top: CameraPose(yaw: 0, pitch: maxPitch, distance: 1.0)
+            case .solid: CameraPose(yaw: 0.6, pitch: 0.5, distance: 1.0)
             }
         }
     }
