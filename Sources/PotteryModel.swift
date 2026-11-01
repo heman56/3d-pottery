@@ -9,10 +9,89 @@ final class PotteryModel {
     static let maxRadius: Float = 0.2
 
     var radii: [Float] = Preset.clay.radii
-    var glaze: Glaze = .clay
+    private(set) var glaze: Glaze = .clay
+    var mode: Mode = .sculpt
+    var showWireframe = false
+    var camera = CameraPose.start
+
+    enum Mode { case sculpt, look }
+
+    // MARK: 復原 / 重做
+
+    private struct Snapshot {
+        var radii: [Float]
+        var glaze: Glaze
+    }
+
+    private static let historyLimit = 60
+    private var undoStack: [Snapshot] = []
+    private var redoStack: [Snapshot] = []
+    /// 一次拖曳（一筆）開始時的樣子，第一次真的改到形狀時才存進復原紀錄
+    @ObservationIgnored private var strokeStart: Snapshot?
+
+    var canUndo: Bool { !undoStack.isEmpty }
+    var canRedo: Bool { !redoStack.isEmpty }
+
+    private var snapshot: Snapshot { Snapshot(radii: radii, glaze: glaze) }
+
+    private func record(_ before: Snapshot) {
+        undoStack.append(before)
+        if undoStack.count > Self.historyLimit { undoStack.removeFirst() }
+        redoStack.removeAll()
+    }
+
+    func undo() {
+        guard let previous = undoStack.popLast() else { return }
+        redoStack.append(snapshot)
+        radii = previous.radii
+        glaze = previous.glaze
+    }
+
+    func redo() {
+        guard let next = redoStack.popLast() else { return }
+        undoStack.append(snapshot)
+        radii = next.radii
+        glaze = next.glaze
+    }
+
+    func setGlaze(_ newGlaze: Glaze) {
+        guard newGlaze != glaze else { return }
+        record(snapshot)
+        glaze = newGlaze
+    }
+
+    func beginStroke() { strokeStart = snapshot }
+    func endStroke() { strokeStart = nil }
+
+    // MARK: 相機
+
+    /// 檢視模式：單指拖曳轉動相機（dx、dy 為螢幕上移動的點數）
+    func orbit(dx: CGFloat, dy: CGFloat) {
+        camera.yaw -= Float(dx) * 0.008
+        camera.pitch = min(max(camera.pitch + Float(dy) * 0.006, 0), CameraPose.maxPitch)
+    }
+
+    func zoom(to distance: Float) {
+        camera.distance = min(max(distance, 0.45), 1.8)
+    }
+
+    func setView(_ preset: CameraPose.Preset) {
+        var pose = preset.pose
+        // 轉最短的方向
+        var delta = (pose.yaw - camera.yaw).truncatingRemainder(dividingBy: 2 * .pi)
+        if delta > .pi { delta -= 2 * .pi } else if delta < -.pi { delta += 2 * .pi }
+        pose.yaw = camera.yaw + delta
+        camera = pose
+    }
+
+    // MARK: 塑形
 
     /// 手指推到某個高度與半徑，周圍幾層會跟著平滑變形
     func sculpt(atHeight y: Float, radius: Float) {
+        if let start = strokeStart {
+            record(start)
+            strokeStart = nil
+        }
         let n = Self.sliceCount
         let center = y / Self.height * Float(n - 1)
         let target = min(max(radius, Self.minRadius), Self.maxRadius)
@@ -28,6 +107,7 @@ final class PotteryModel {
     }
 
     func apply(_ preset: Preset) {
+        record(snapshot)
         radii = preset.radii
     }
 
@@ -97,6 +177,49 @@ final class PotteryModel {
 
         /// 上釉後表面光滑發亮
         var isGlazed: Bool { self != .clay }
+    }
+}
+
+/// 相機繞著陶器轉：yaw 水平角、pitch 仰角（往下看為正）、distance 距離（公尺）
+struct CameraPose: Equatable {
+    var yaw: Float
+    var pitch: Float
+    var distance: Float
+
+    static let maxPitch: Float = 1.5   // 約 86°，再高就和向上的方向重疊
+    static let start = CameraPose(yaw: 0, pitch: 0.5, distance: 0.92)
+
+    enum Preset: CaseIterable, Identifiable {
+        case front, side, top, solid
+
+        var id: Self { self }
+
+        var title: String {
+            switch self {
+            case .front: "前視"
+            case .side: "側視"
+            case .top: "上視"
+            case .solid: "立體"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .front: "rectangle.portrait"
+            case .side: "rectangle.portrait.rotate"
+            case .top: "circle.dashed"
+            case .solid: "cube"
+            }
+        }
+
+        var pose: CameraPose {
+            switch self {
+            case .front: CameraPose(yaw: 0, pitch: 0, distance: 0.92)
+            case .side: CameraPose(yaw: .pi / 2, pitch: 0, distance: 0.92)
+            case .top: CameraPose(yaw: 0, pitch: maxPitch, distance: 0.92)
+            case .solid: CameraPose(yaw: 0.6, pitch: 0.5, distance: 0.92)
+            }
+        }
     }
 }
 
