@@ -33,6 +33,9 @@ final class PotteryScene {
     private var viewHeight: Float = 0
     private var topInset: Float = 0
     private var bottomInset: Float = 0
+    private var targetTopInset: Float = 0
+    private var targetBottomInset: Float = 0
+    private var hasInsets = false
 
     private static let baseThickness: Float = 0.012
     private static let wall: Float = 0.88   // 內壁 / 外壁 的大小比例
@@ -133,8 +136,13 @@ final class PotteryScene {
 
     /// 畫面上方（標題）與下方（控制面板）各蓋住多少點。面板比標題高時，陶器要往上移
     func setInsets(top: CGFloat, bottom: CGFloat) {
-        topInset = Float(top)
-        bottomInset = Float(bottom)
+        targetTopInset = Float(top)
+        targetBottomInset = Float(bottom)
+        if !hasInsets {   // 第一次直接就位，不要在啟動時滑動
+            topInset = targetTopInset
+            bottomInset = targetBottomInset
+            hasInsets = true
+        }
     }
 
     /// 手指位置 → 陶器剖面上的 x、y、z 座標（公尺）。
@@ -190,6 +198,9 @@ final class PotteryScene {
         currentPose.yaw += (targetPose.yaw - currentPose.yaw) * k
         currentPose.pitch += (targetPose.pitch - currentPose.pitch) * k
         currentPose.distance += (targetPose.distance - currentPose.distance) * k
+        // 選單收合／展開時，陶器順著面板的高度變化慢慢滑到新的中央
+        topInset += (targetTopInset - topInset) * k
+        bottomInset += (targetBottomInset - bottomInset) * k
         applyCamera()
     }
 

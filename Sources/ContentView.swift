@@ -13,6 +13,8 @@ struct ContentView: View {
     @State private var headerFrame = CGRect.zero
     @State private var controlsFrame = CGRect.zero
     @State private var pickedItem: PhotosPickerItem?
+    /// 選單收起來時，3D 畫面可以用更大的空間；塑形／檢視兩個模式的按鈕仍然留著。記住使用者的選擇
+    @AppStorage("menuCollapsed") private var menuCollapsed = false
 
     private static let brown = Color(red: 0.45, green: 0.25, blue: 0.12)
 
@@ -35,6 +37,13 @@ struct ContentView: View {
             .onChange(of: model.glaze) { scene.setGlaze(model.glaze) }
             .onChange(of: model.showWireframe) { scene.setWireframe(model.showWireframe) }
             .onChange(of: model.camera) { scene.setCamera(model.camera) }
+            // 選單收合／展開的動畫結束後，再重算一次陶器的位置，避免動畫途中量到的高度留下來
+            .onChange(of: menuCollapsed) {
+                Task {
+                    try? await Task.sleep(for: .milliseconds(450))
+                    updateInsets()
+                }
+            }
             .onGeometryChange(for: CGSize.self) { $0.size } action: {
                 scene.setViewport($0)
                 viewHeight = $0.height
@@ -210,31 +219,9 @@ struct ContentView: View {
         }
     }
 
-    private var controls: some View {
+    /// 形狀、底面、扭轉、花紋、釉色：可以整個收起來
+    private var menuBody: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                ToolButton(title: "塑形", symbol: "hand.draw.fill", isOn: model.mode == .sculpt) {
-                    model.mode = .sculpt
-                }
-                ToolButton(title: "檢視", symbol: "rotate.3d", isOn: model.mode == .look) {
-                    model.mode = .look
-                }
-                Divider().frame(height: 40)
-                ToolButton(title: "網格", symbol: "grid", isOn: model.showWireframe) {
-                    model.showWireframe.toggle()
-                }
-            }
-
-            if model.mode == .look {
-                HStack(spacing: 10) {
-                    ForEach(CameraPose.Preset.allCases) { preset in
-                        ToolButton(title: preset.title, symbol: preset.symbol) {
-                            model.setView(preset)
-                        }
-                    }
-                }
-            }
-
             HStack(spacing: 10) {
                 ForEach(PotteryModel.Preset.allCases) { preset in
                     ToolButton(title: preset.title, symbol: preset.symbol) {
@@ -307,6 +294,43 @@ struct ContentView: View {
                     }
                     .accessibilityLabel("釉色")
                 }
+            }
+        }
+    }
+
+    private var controls: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                ToolButton(title: "塑形", symbol: "hand.draw.fill", isOn: model.mode == .sculpt) {
+                    model.mode = .sculpt
+                }
+                ToolButton(title: "檢視", symbol: "rotate.3d", isOn: model.mode == .look) {
+                    model.mode = .look
+                }
+                Divider().frame(height: 40)
+                ToolButton(title: "網格", symbol: "grid", isOn: model.showWireframe) {
+                    model.showWireframe.toggle()
+                }
+                ToolButton(title: menuCollapsed ? "展開" : "收合", symbol: menuCollapsed ? "chevron.up" : "chevron.down") {
+                    withAnimation(.easeInOut(duration: 0.25)) { menuCollapsed.toggle() }
+                }
+                // 切換時整顆重新建立，不在動畫中原地改圖示與文字（模擬器上偶爾在更新圖示排版時當掉）
+                .id(menuCollapsed)
+            }
+
+            if model.mode == .look {
+                HStack(spacing: 10) {
+                    ForEach(CameraPose.Preset.allCases) { preset in
+                        ToolButton(title: preset.title, symbol: preset.symbol) {
+                            model.setView(preset)
+                        }
+                    }
+                }
+            }
+
+            if !menuCollapsed {
+                menuBody
+                    .transition(.opacity)
             }
         }
         .padding(14)
