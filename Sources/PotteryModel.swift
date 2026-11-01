@@ -123,22 +123,52 @@ final class PotteryModel {
 
     // MARK: 塑形
 
-    /// 手指推到某個高度與半徑，周圍幾層會跟著平滑變形
-    func sculpt(atHeight y: Float, radius: Float) {
+    /// 這一筆開始時，陶壁與手指的距離。之後手指移到哪，陶壁就保持這個距離跟著走，
+    /// 所以剛點下去、還沒移動時形狀不會變
+    @ObservationIgnored private var grabOffset: Float = 0
+    /// 上一個事件的位置，用來補齊手指快速移動時漏掉的中間軌跡
+    @ObservationIgnored private var lastBrush: (height: Float, radius: Float)?
+
+    func surfaceRadius(atHeight y: Float) -> Float {
+        let position = min(max(y / Self.height, 0), 1) * Float(Self.sliceCount - 1)
+        let lower = Int(position)
+        let upper = min(lower + 1, Self.sliceCount - 1)
+        return radii[lower] + (radii[upper] - radii[lower]) * (position - Float(lower))
+    }
+
+    /// 手指剛碰到陶器（高度 y、離轉軸 fingerRadius）：只記下距離，不改形狀
+    func beginSculpt(atHeight y: Float, fingerRadius: Float) {
+        grabOffset = surfaceRadius(atHeight: y) - fingerRadius
+        lastBrush = nil
+    }
+
+    /// 手指移動到高度 y、離轉軸 fingerRadius：沿著手指的軌跡把陶壁推過去
+    func sculpt(atHeight y: Float, fingerRadius: Float) {
         commitStrokeStart()
-        let n = Self.sliceCount
-        let center = y / Self.height * Float(n - 1)
-        let target = min(max(radius, Self.minRadius), Self.maxRadius)
+        let target = min(max(fingerRadius + grabOffset, Self.minRadius), Self.maxRadius)
+        let from = lastBrush ?? (y, target)
+        lastBrush = (y, target)
+
+        let layerHeight = Self.height / Float(Self.sliceCount - 1)
+        let steps = max(1, Int((abs(y - from.height) / (layerHeight * 0.5)).rounded(.up)))
         var next = radii
-        for i in 0..<n {
-            // 層數改變時，筆刷的實際寬度（約 ±3 公分）維持不變
-            let d = (Float(i) - center) * 31 / Float(n - 1)
-            let weight = exp(-d * d / 8)
-            if weight > 0.02 {
-                next[i] = radii[i] + (target - radii[i]) * weight
-            }
+        for step in 1...steps {
+            let f = Float(step) / Float(steps)
+            paint(&next, atHeight: from.height + (y - from.height) * f, radius: from.radius + (target - from.radius) * f)
         }
         radii = next
+    }
+
+    /// 筆刷是一個「帽子形」：正中央那一層完全跟到手指，離開不到一層就不再影響。
+    /// 這樣手指軌跡上比一層還細的轉折也不會被前後的事件抹平，造型才會貼著畫出的曲線
+    private func paint(_ values: inout [Float], atHeight y: Float, radius: Float) {
+        let n = Self.sliceCount
+        let center = y / (Self.height / Float(n - 1))
+        for i in max(0, Int(center))...min(n - 1, Int(center) + 1) {
+            let distance = abs(Float(i) - center)
+            let weight = min(max(1.6 * (1 - distance), 0), 1)
+            values[i] += (radius - values[i]) * weight
+        }
     }
 
     func apply(_ preset: Preset) {

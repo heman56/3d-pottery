@@ -103,19 +103,33 @@ final class PotteryScene {
         targetPose = pose
     }
 
-    /// 以螢幕的短邊為準固定視角，直立的 iPhone 與橫放的 iPad 看到的陶器大小才差不多
+    /// 以螢幕的短邊為準固定視角（44°），直立的 iPhone 與橫放的 iPad 看到的陶器大小才差不多。
+    /// 一律用「垂直」視角，由長寬比換算：unproject（手指位置轉成 3D 座標）只認垂直視角，
+    /// 若改用水平視角，畫面和手勢會對不上，手指點到的半徑會偏小
     func setViewport(_ size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
-        camera.camera.fieldOfViewOrientation = size.width < size.height ? .horizontal : .vertical
-        camera.camera.fieldOfViewInDegrees = 44
+        let shortSide: Float = 44 * .pi / 180
+        let aspect = Float(size.height / size.width)   // 直立時 > 1
+        let vertical = size.width < size.height ? 2 * atan(tan(shortSide / 2) * aspect) : shortSide
+        camera.camera.fieldOfViewOrientation = .vertical
+        camera.camera.fieldOfViewInDegrees = vertical * 180 / .pi
     }
 
     /// 手指位置 → 陶器剖面上的 x、y、z 座標（公尺）。
-    /// 剖面是通過轉軸、面向相機的垂直平面，所以從任何水平角度都能塑形
-    func profilePoint(at point: CGPoint) -> SIMD3<Float>? {
+    /// 剖面是通過轉軸、面向相機的垂直平面，所以從任何水平角度都能塑形。
+    /// towardCamera：把平面往相機方向平移的距離。畫面上看到的陶器外緣是圓柱的切點，
+    /// 位在轉軸平面前方約 r²/D 處，相機俯視時不修正，高度會差約一公分
+    func profilePoint(at point: CGPoint, towardCamera offset: Float = 0) -> SIMD3<Float>? {
         // unproject 的平面是變換後的 X-Z 平面：先轉 90° 變成 X-Y 平面，再依相機水平角轉向相機
         let facing = simd_quatf(angle: currentPose.yaw, axis: [0, 1, 0]) * simd_quatf(angle: .pi / 2, axis: [1, 0, 0])
-        return content?.unproject(point, from: .local, to: .scene, ontoPlane: Transform(rotation: facing).matrix)
+        let toward = SIMD3<Float>(sin(currentPose.yaw), 0, cos(currentPose.yaw)) * offset
+        return content?.unproject(point, from: .local, to: .scene, ontoPlane: Transform(rotation: facing, translation: toward).matrix)
+    }
+
+    /// 相機看一根半徑 r 的圓柱時，外緣切點在轉軸平面前方多遠
+    func tangentDepth(radius r: Float) -> Float {
+        let horizontalDistance = max(currentPose.distance * cos(currentPose.pitch), r * 1.01)
+        return r * r / horizontalDistance
     }
 
     /// 目前的相機是不是太陡（從正上方看），陡到無法塑形

@@ -7,6 +7,7 @@ struct ContentView: View {
     /// 拖曳時上一個手指位置，用來算移動量
     @State private var lastDragPoint: CGPoint?
     @State private var zoomStart: Float?
+    @State private var isSculpting = false
 
     private static let brown = Color(red: 0.45, green: 0.25, blue: 0.12)
 
@@ -63,13 +64,23 @@ struct ContentView: View {
             .onChanged { value in
                 switch model.mode {
                 case .sculpt:
-                    if lastDragPoint == nil { model.beginStroke() }
-                    lastDragPoint = value.location
                     guard !scene.isTooSteepToSculpt,
-                          let p = scene.profilePoint(at: value.location),
+                          let rough = scene.profilePoint(at: value.location),
+                          rough.y >= 0, rough.y <= PotteryModel.height else { return }
+                    // 先用轉軸平面估出高度與目前的半徑，再把平面移到外緣切點的位置重算一次
+                    let depth = scene.tangentDepth(radius: model.surfaceRadius(atHeight: rough.y))
+                    guard let p = scene.profilePoint(at: value.location, towardCamera: depth),
                           p.y >= 0, p.y <= PotteryModel.height else { return }
                     // 剖面平面通過轉軸，所以離轉軸的水平距離就是半徑
-                    model.sculpt(atHeight: p.y, radius: hypot(p.x, p.z))
+                    let fingerRadius = hypot(p.x, p.z)
+                    if !isSculpting {
+                        // 剛碰到：只記下手指與陶壁的距離，不改形狀
+                        model.beginStroke()
+                        model.beginSculpt(atHeight: p.y, fingerRadius: fingerRadius)
+                        isSculpting = true
+                    } else {
+                        model.sculpt(atHeight: p.y, fingerRadius: fingerRadius)
+                    }
                 case .look:
                     let previous = lastDragPoint ?? value.location
                     model.orbit(dx: value.location.x - previous.x, dy: value.location.y - previous.y)
@@ -78,6 +89,7 @@ struct ContentView: View {
             }
             .onEnded { _ in
                 lastDragPoint = nil
+                isSculpting = false
                 model.endStroke()
             }
     }
