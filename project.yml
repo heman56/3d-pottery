@@ -10,7 +10,7 @@ settings:
 targets:
   PotteryMaster:
     type: application
-    platform: iOS
+    supportedDestinations: [iOS, macCatalyst]   # iPhone、iPad，以及 Mac 本機（Mac Catalyst）
     sources:
       - Sources
     info:
