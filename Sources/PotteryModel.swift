@@ -95,7 +95,16 @@ final class PotteryModel {
             }
         }
 
-        /// 上釉後比較光滑發亮
-        var roughness: Float { self == .clay ? 0.9 : 0.25 }
+        /// 上釉後表面光滑發亮
+        var isGlazed: Bool { self != .clay }
+    }
+}
+
+extension UIColor {
+    /// 乘上係數讓顏色變暗（係數 < 1）
+    func shaded(by factor: CGFloat) -> UIColor {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        getRed(&r, green: &g, blue: &b, alpha: &a)
+        return UIColor(red: r * factor, green: g * factor, blue: b * factor, alpha: a)
     }
 }
