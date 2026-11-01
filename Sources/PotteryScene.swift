@@ -48,12 +48,20 @@ final class PotteryScene {
     init() {
         root.addChild(backdrop)
 
-        // 轉盤
-        let disc = ModelEntity(
-            mesh: .generateCylinder(height: 0.03, radius: 0.34),
-            materials: [Self.makeMaterial(color: UIColor(white: 0.72, alpha: 1), glazed: false, wireframe: false, texture: nil)]
-        )
-        disc.position.y = -0.015
+        // 轉盤：自己組網格，頂面貼放射狀線條的貼圖，轉動時才看得出來在轉
+        let disc: ModelEntity
+        if let mesh = Self.makeTurntableMesh(radius: 0.34, thickness: 0.03), let texture = Self.turntableTexture() {
+            disc = ModelEntity(
+                mesh: mesh,
+                materials: [Self.makeMaterial(color: .white, glazed: false, wireframe: false, texture: texture)]
+            )
+        } else {
+            disc = ModelEntity(
+                mesh: .generateCylinder(height: 0.03, radius: 0.34),
+                materials: [Self.makeMaterial(color: UIColor(white: 0.72, alpha: 1), glazed: false, wireframe: false, texture: nil)]
+            )
+            disc.position.y = -0.015
+        }
         turntable.addChild(disc)
 
         turntable.addChild(pot)
@@ -499,6 +507,115 @@ final class PotteryScene {
         descriptor.positions = MeshBuffer(positions)
         descriptor.primitives = .triangles(indices)
         return try? MeshResource.generate(from: [descriptor])
+    }
+
+    // MARK: 轉盤
+
+    /// 轉盤：頂面（y = 0）是一圈扇形，側面是一圈牆。頂面的 UV 用俯視的位置，
+    /// 側面的 UV 固定指到貼圖角落那一點（純灰色）
+    private static func makeTurntableMesh(radius: Float, thickness: Float, segments: Int = 96) -> MeshResource? {
+        var positions: [SIMD3<Float>] = []
+        var normals: [SIMD3<Float>] = []
+        var uvs: [SIMD2<Float>] = []
+        var indices: [UInt32] = []
+
+        func addTriangle(_ a: Int, _ b: Int, _ c: Int, facing n: SIMD3<Float>) {
+            let g = cross(positions[b] - positions[a], positions[c] - positions[a])
+            if dot(g, n) >= 0 {
+                indices += [UInt32(a), UInt32(b), UInt32(c)]
+            } else {
+                indices += [UInt32(a), UInt32(c), UInt32(b)]
+            }
+        }
+
+        // 頂面
+        positions.append([0, 0, 0])
+        normals.append([0, 1, 0])
+        uvs.append([0.5, 0.5])
+        for k in 0..<segments {
+            let a = 2 * Float.pi * Float(k) / Float(segments)
+            positions.append([radius * cos(a), 0, radius * sin(a)])
+            normals.append([0, 1, 0])
+            uvs.append([0.5 + 0.5 * cos(a), 0.5 + 0.5 * sin(a)])
+        }
+        for k in 0..<segments {
+            addTriangle(0, 1 + k, 1 + (k + 1) % segments, facing: [0, 1, 0])
+        }
+
+        // 側面
+        let wall = positions.count
+        let plain: SIMD2<Float> = [0.01, 0.01]
+        for k in 0..<segments {
+            let a = 2 * Float.pi * Float(k) / Float(segments)
+            let outward: SIMD3<Float> = [cos(a), 0, sin(a)]
+            positions.append([radius * cos(a), 0, radius * sin(a)])
+            positions.append([radius * cos(a), -thickness, radius * sin(a)])
+            normals.append(outward)
+            normals.append(outward)
+            uvs.append(plain)
+            uvs.append(plain)
+        }
+        for k in 0..<segments {
+            let next = (k + 1) % segments
+            let topA = wall + 2 * k, bottomA = topA + 1
+            let topB = wall + 2 * next, bottomB = topB + 1
+            let outward = normals[topA]
+            addTriangle(topA, topB, bottomB, facing: outward)
+            addTriangle(topA, bottomB, bottomA, facing: outward)
+        }
+
+        var descriptor = MeshDescriptor(name: "turntable")
+        descriptor.positions = MeshBuffer(positions)
+        descriptor.normals = MeshBuffer(normals)
+        descriptor.textureCoordinates = MeshBuffer(uvs)
+        descriptor.primitives = .triangles(indices)
+        return try? MeshResource.generate(from: [descriptor])
+    }
+
+    /// 轉盤的貼圖：灰底，交錯的扇形（每 10° 一塊）、放射狀的線（每 30° 加粗）、幾圈同心圓。
+    /// 圓以外（含角落）是純灰色，轉盤側面就取這個顏色
+    private static func turntableTexture() -> TextureResource? {
+        let side: CGFloat = 1024
+        let center = CGPoint(x: side / 2, y: side / 2)
+        let radius = side / 2
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { context in
+            let cg = context.cgContext
+            UIColor(white: 0.70, alpha: 1).setFill()
+            cg.fill(CGRect(x: 0, y: 0, width: side, height: side))
+
+            // 交錯的扇形：深淺相間，轉動時一眼就看得出來
+            let wedges = 36
+            for i in 0..<wedges where i % 2 == 0 {
+                let start = 2 * CGFloat.pi * CGFloat(i) / CGFloat(wedges)
+                let end = 2 * CGFloat.pi * CGFloat(i + 1) / CGFloat(wedges)
+                cg.move(to: center)
+                cg.addArc(center: center, radius: radius * 0.99, startAngle: start, endAngle: end, clockwise: false)
+                cg.closePath()
+                UIColor(white: 0.60, alpha: 1).setFill()
+                cg.fillPath()
+            }
+
+            // 放射狀的線
+            UIColor(white: 0.36, alpha: 1).setStroke()
+            for i in 0..<wedges {
+                let angle = 2 * CGFloat.pi * CGFloat(i) / CGFloat(wedges)
+                cg.setLineWidth(i % 3 == 0 ? 7 : 3)
+                cg.move(to: CGPoint(x: center.x + radius * 0.10 * cos(angle), y: center.y + radius * 0.10 * sin(angle)))
+                cg.addLine(to: CGPoint(x: center.x + radius * 0.99 * cos(angle), y: center.y + radius * 0.99 * sin(angle)))
+                cg.strokePath()
+            }
+
+            // 同心圓與外緣
+            for fraction in [0.30, 0.55, 0.80, 0.99] as [CGFloat] {
+                cg.setLineWidth(fraction > 0.95 ? 10 : 4)
+                cg.strokeEllipse(in: CGRect(x: center.x - radius * fraction, y: center.y - radius * fraction,
+                                            width: radius * fraction * 2, height: radius * fraction * 2))
+            }
+        }
+        guard let cgImage = image.cgImage else { return nil }
+        return try? TextureResource.generate(from: cgImage, options: .init(semantic: .color))
     }
 
     // MARK: 花紋貼圖
