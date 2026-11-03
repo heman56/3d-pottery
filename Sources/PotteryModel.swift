@@ -19,6 +19,7 @@ final class PotteryModel {
     private(set) var baseShape: BaseShape = .circle
     private(set) var twist: Float = 0
     private(set) var pattern: Pattern = .stripes
+    private(set) var finish: Finish = .matte
     /// 貼滿陶器外面的照片（只有「照片」花紋會用到）。照片會被縮放成「繞一圈 tilesAround 張、
     /// 從底到口 tilesUp 張」，張數都是整數，所以四方連續的圖案接得起來
     private(set) var photo: UIImage?
@@ -44,6 +45,7 @@ final class PotteryModel {
         var baseShape: BaseShape
         var twist: Float
         var pattern: Pattern
+        var finish: Finish
         var tilesAround: Int
         var tilesUp: Int
     }
@@ -58,7 +60,7 @@ final class PotteryModel {
     var canRedo: Bool { !redoStack.isEmpty }
 
     private var snapshot: Snapshot {
-        Snapshot(radii: radii, glaze: glaze, baseShape: baseShape, twist: twist, pattern: pattern,
+        Snapshot(radii: radii, glaze: glaze, baseShape: baseShape, twist: twist, pattern: pattern, finish: finish,
                  tilesAround: tilesAround, tilesUp: tilesUp)
     }
 
@@ -68,6 +70,7 @@ final class PotteryModel {
         baseShape = s.baseShape
         twist = s.twist
         pattern = s.pattern
+        finish = s.finish
         tilesAround = s.tilesAround
         tilesUp = s.tilesUp
     }
@@ -142,6 +145,12 @@ final class PotteryModel {
         let tileWidth = meanCircumference / Float(tilesAround)
         let tileHeight = tileWidth / aspect
         tilesUp = min(max(Int((profileLength / tileHeight).rounded()), 1), Self.maxTiles)
+    }
+
+    func setFinish(_ newFinish: Finish) {
+        guard newFinish != finish else { return }
+        record(snapshot)
+        finish = newFinish
     }
 
     func setPattern(_ newPattern: Pattern) {
@@ -361,9 +370,6 @@ final class PotteryModel {
             case .white: UIColor(red: 0.95, green: 0.93, blue: 0.88, alpha: 1)
             }
         }
-
-        /// 上釉後表面光滑發亮
-        var isGlazed: Bool { self != .clay }
     }
 }
 

@@ -18,7 +18,10 @@ final class PotteryScene {
     private var glaze = PotteryModel.Glaze.clay
     private var pattern = PotteryModel.Pattern.stripes
     private var wireframe = false
-    private var material: any RealityKit.Material = PotteryScene.makeMaterial(color: .brown, glazed: false, wireframe: false, texture: nil)
+    private var finish = Finish.matte
+    private var material: any RealityKit.Material = PotteryMaterial.make(color: .brown, finish: .matte, wireframe: false, texture: nil)
+    /// 環境光（IBL）的來源：只有真機與 Mac 版會用到（Intel 模擬器的光照材質會當機）
+    private let lightSource = Entity()
     private var textures: [PotteryModel.Pattern: TextureResource] = [:]
     private var photo: UIImage?
     private var photoTexture: TextureResource?
@@ -50,7 +53,7 @@ final class PotteryScene {
         root.addChild(backdrop)
 
         // 轉盤：自己組網格；先用純灰色，放射狀線條的貼圖在 loadTextures() 載入後才貼上
-        let plainGray = Self.makeMaterial(color: UIColor(white: 0.72, alpha: 1), glazed: false, wireframe: false, texture: nil)
+        let plainGray = PotteryMaterial.make(color: UIColor(white: 0.72, alpha: 1), finish: .matte, wireframe: false, texture: nil)
         if let mesh = Self.makeTurntableMesh(radius: PotteryModel.turntableRadius, thickness: 0.03) {
             disc.model = ModelComponent(mesh: mesh, materials: [plainGray])
         } else {
@@ -61,6 +64,7 @@ final class PotteryScene {
 
         turntable.addChild(pot)
         root.addChild(turntable)
+        root.addChild(lightSource)
 
         root.addChild(camera)
         applyCamera()
@@ -70,43 +74,16 @@ final class PotteryScene {
         #else
         // 主光：從右上前方打來，產生柔和的陰影
         let sun = DirectionalLight()
-        sun.light.intensity = 2500
+        sun.light.intensity = 1500
         sun.shadow = DirectionalLightComponent.Shadow(maximumDistance: 2, depthBias: 2)
         sun.look(at: [0, 0.1, 0], from: [0.6, 1.2, 0.8], relativeTo: nil)
         root.addChild(sun)
 
         // 補光：從左側照亮暗部，避免陰影太黑
         let fill = DirectionalLight()
-        fill.light.intensity = 900
+        fill.light.intensity = 300
         fill.look(at: [0, 0.1, 0], from: [-0.8, 0.5, 0.6], relativeTo: nil)
         root.addChild(fill)
-        #endif
-    }
-
-    /// 模擬器（Intel Mac）的 RealityKit 編譯 PBR 材質會當機，模擬器上改用無光照材質。
-    /// 真機：未上釉的陶土粗糙無光；上釉後有透明的亮面塗層，會反光
-    static func makeMaterial(color: UIColor, glazed: Bool, wireframe: Bool, texture: TextureResource?) -> any RealityKit.Material {
-        #if targetEnvironment(simulator)
-        var material = UnlitMaterial(color: color)
-        if let texture { material.color = .init(tint: color, texture: .init(texture)) }
-        if wireframe { material.triangleFillMode = .lines }
-        return material
-        #else
-        var material = PhysicallyBasedMaterial()
-        if let texture {
-            material.baseColor = .init(tint: color, texture: .init(texture))
-        } else {
-            material.baseColor = .init(tint: color)
-        }
-        material.metallic = .init(floatLiteral: 0)
-        material.roughness = .init(floatLiteral: glazed ? 0.35 : 0.95)
-        if glazed {
-            material.clearcoat = .init(floatLiteral: 1)
-            material.clearcoatRoughness = .init(floatLiteral: 0.06)
-            material.specular = .init(floatLiteral: 0.7)
-        }
-        if wireframe { material.triangleFillMode = .lines }
-        return material
         #endif
     }
 
@@ -225,8 +202,26 @@ final class PotteryScene {
         }
         if let image = Self.turntableImage(),
            let texture = try? await TextureResource(image: image, withName: nil, options: .init(semantic: .color)) {
-            disc.model?.materials = [Self.makeMaterial(color: .white, glazed: false, wireframe: false, texture: texture)]
+            disc.model?.materials = [PotteryMaterial.make(color: .white, finish: .matte, wireframe: false, texture: texture)]
         }
+        await loadEnvironment()
+        refreshMaterials()
+    }
+
+    /// 載入環境光，讓陶器和轉盤接收：亮釉、金屬、琉璃的反光都靠它。
+    /// 強度指數 2.3 是用離屏渲染測試（tools/render-test）調出來的：HDRI 本身偏暗，每加 1 亮度乘 2
+    private func loadEnvironment() async {
+        #if !targetEnvironment(simulator)
+        guard let environment = await StudioLighting.load() else { return }
+        lightSource.components.set(ImageBasedLightComponent(source: .single(environment), intensityExponent: 2.3))
+        for entity in [pot, disc] {
+            entity.components.set(ImageBasedLightReceiverComponent(imageBasedLight: lightSource))
+        }
+        #endif
+    }
+
+    func setFinish(_ finish: Finish) {
+        self.finish = finish
         refreshMaterials()
     }
 
@@ -269,7 +264,7 @@ final class PotteryScene {
         let usePhoto = pattern == .photo && photoTexture != nil
         let color = wireframe ? glaze.color.shaded(by: 0.55) : (usePhoto ? UIColor.white : glaze.color)
         let texture = wireframe ? nil : (usePhoto ? photoTexture : textures[pattern])
-        material = Self.makeMaterial(color: color, glazed: glaze.isGlazed, wireframe: wireframe, texture: texture)
+        material = PotteryMaterial.make(color: color, finish: finish, wireframe: wireframe, texture: texture)
         pot.model?.materials = [material]
 
         cavityMaterial = UnlitMaterial(color: glaze.color.shaded(by: 0.45))

@@ -13,6 +13,9 @@ targets:
     supportedDestinations: [iOS, macCatalyst]   # iPhone、iPad，以及 Mac 本機（Mac Catalyst）
     sources:
       - Sources
+      - path: Resources
+        excludes:
+          - CREDITS.md
     info:
       path: Sources/Info.plist
       properties:

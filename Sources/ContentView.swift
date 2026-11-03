@@ -26,6 +26,7 @@ struct ContentView: View {
                 scene.start(in: content)
                 scene.setGlaze(model.glaze)
                 scene.setPattern(model.pattern)
+                scene.setFinish(model.finish)
                 scene.rebuild(model.spec)
                 await scene.loadTextures()
             }
@@ -36,6 +37,7 @@ struct ContentView: View {
             .onChange(of: model.photo) { Task { await scene.setPhoto(model.photo) } }
             .onChange(of: pickedItem) { loadPickedPhoto() }
             .onChange(of: model.glaze) { scene.setGlaze(model.glaze) }
+            .onChange(of: model.finish) { scene.setFinish(model.finish) }
             .onChange(of: model.showWireframe) { scene.setWireframe(model.showWireframe) }
             .onChange(of: model.camera) { scene.setCamera(model.camera) }
             // 選單收合／展開的動畫結束後，再重算一次陶器的位置，避免動畫途中量到的高度留下來
@@ -281,6 +283,16 @@ struct ContentView: View {
             if model.pattern == .photo {
                 photoControls
             }
+
+            Picker("質感", selection: Binding(
+                get: { model.finish },
+                set: { model.setFinish($0) }
+            )) {
+                ForEach(Finish.allCases) { finish in
+                    Text(finish.title).tag(finish)
+                }
+            }
+            .pickerStyle(.segmented)
 
             HStack(spacing: 12) {
                 ForEach(PotteryModel.Glaze.allCases) { glaze in
