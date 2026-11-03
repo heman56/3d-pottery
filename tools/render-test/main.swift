@@ -25,12 +25,30 @@ func render() async throws {
     // 兩排：上排用赤陶色，下排用藍色；五欄是五種質感
     let colors: [PlatformColor] = [PlatformColor(red: 0.72, green: 0.45, blue: 0.30, alpha: 1),
                                    PlatformColor(red: 0.20, green: 0.42, blue: 0.80, alpha: 1)]
+    // SWAP=1：先全部用「發光」渲染，再換成各自的質感，檢查換材質後有沒有殘留
+    let swap = ProcessInfo.processInfo.environment["SWAP"] != nil || ProcessInfo.processInfo.environment["SWAPTEX"] != nil
+    // SWAPTEX=1：先貼條紋貼圖，再換成另一張（藍底黃點）貼圖並用白色色調，檢查貼圖有沒有殘留
+    let swapTex = ProcessInfo.processInfo.environment["SWAPTEX"] != nil
+    func makeImage(stripes: Bool) -> CGImage {
+        let ctx = CGContext(data: nil, width: 256, height: 256, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.setFillColor(stripes ? CGColor(gray: 1, alpha: 1) : CGColor(red: 0.1, green: 0.2, blue: 0.9, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: 256, height: 256))
+        ctx.setFillColor(stripes ? CGColor(gray: 0.3, alpha: 1) : CGColor(red: 1, green: 0.9, blue: 0, alpha: 1))
+        if stripes { for i in stride(from: 0, to: 256, by: 64) { ctx.fill(CGRect(x: i, y: 0, width: 32, height: 256)) } }
+        else { ctx.fillEllipse(in: CGRect(x: 64, y: 64, width: 128, height: 128)) }
+        return ctx.makeImage()!
+    }
+    let texA = swapTex ? try await TextureResource(image: makeImage(stripes: true), withName: nil, options: .init(semantic: .color)) : nil
+    let texB = swapTex ? try await TextureResource(image: makeImage(stripes: false), withName: nil, options: .init(semantic: .color)) : nil
+    var balls: [(ModelEntity, PlatformColor, Finish)] = []
     for (row, color) in colors.enumerated() {
         for (column, finish) in Finish.allCases.enumerated() {
             let ball = ModelEntity(
                 mesh: .generateSphere(radius: 0.12),
-                materials: [PotteryMaterial.make(color: color, finish: finish, wireframe: false, texture: nil)]
+                materials: [PotteryMaterial.make(color: color, finish: swap ? .glow : finish, wireframe: false, texture: texA)]
             )
+            balls.append((ball, color, finish))
             ball.position = [Float(column - 2) * 0.3, Float(1 - row) * 0.3 - 0.15, 0]
             renderer.entities.append(ball)
         }
@@ -66,7 +84,12 @@ func render() async throws {
     let output = try RealityRenderer.CameraOutput(.singleProjection(colorTexture: target))
 
     // 材質與環境光是非同步載入的，多渲染幾張，取最後一張
-    for _ in 0..<40 {
+    for i in 0..<40 {
+        if (swap || swapTex) && i == 20 {
+            for (ball, color, finish) in balls {
+                ball.model?.materials = [PotteryMaterial.make(color: swapTex ? .white : color, finish: finish, wireframe: false, texture: texB)]
+            }
+        }
         try renderer.updateAndRender(deltaTime: 0.1, cameraOutput: output)
         try await Task.sleep(for: .milliseconds(60))
     }

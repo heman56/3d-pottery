@@ -19,6 +19,7 @@ final class PotteryScene {
     private var pattern = PotteryModel.Pattern.stripes
     private var wireframe = false
     private var finish = Finish.matte
+    private var interiorMaterial: any RealityKit.Material = PotteryMaterial.make(color: .darkGray, finish: .matte, wireframe: false, texture: nil)
     private var material: any RealityKit.Material = PotteryMaterial.make(color: .brown, finish: .matte, wireframe: false, texture: nil)
     /// 環境光（IBL）的來源：只有真機與 Mac 版會用到（Intel 模擬器的光照材質會當機）
     private let lightSource = Entity()
@@ -265,7 +266,10 @@ final class PotteryScene {
         let color = wireframe ? glaze.color.shaded(by: 0.55) : (usePhoto ? UIColor.white : glaze.color)
         let texture = wireframe ? nil : (usePhoto ? photoTexture : textures[pattern])
         material = PotteryMaterial.make(color: color, finish: finish, wireframe: wireframe, texture: texture)
-        pot.model?.materials = [material]
+        // 內側：同釉色的深色素面，不上釉（不受質感與花紋影響）
+        let interiorColor = wireframe ? color : glaze.color.shaded(by: 0.5)
+        interiorMaterial = PotteryMaterial.make(color: interiorColor, finish: .matte, wireframe: wireframe, texture: nil)
+        pot.model?.materials = [material, interiorMaterial]
 
         cavityMaterial = UnlitMaterial(color: glaze.color.shaded(by: 0.45))
         cavity.model?.materials = [cavityMaterial]
@@ -275,7 +279,7 @@ final class PotteryScene {
     /// 重新產生陶器網格。連續拖曳時只保留最新的一份，避免排隊
     func rebuild(_ spec: VesselSpec) {
         guard let mesh = Self.makeVessel(spec) else { return }
-        pot.model = ModelComponent(mesh: mesh, materials: [material])
+        pot.model = ModelComponent(mesh: mesh, materials: [material, interiorMaterial])
 
         #if targetEnvironment(simulator)
         // 模擬器沒有光影，用一片深色的同形狀薄片假裝容器開口的陰暗內側
@@ -370,6 +374,9 @@ final class PotteryScene {
         var normals: [SIMD3<Float>] = []
         var uvs: [SIMD2<Float>] = []
         var indices: [UInt32] = []
+        // 每個三角形用哪個材質：0 是外側（上釉、有花紋），1 是內側（深色素面，不上釉）
+        var faceMaterials: [UInt32] = []
+        var currentMaterial: UInt32 = 0
 
         func point(_ column: Int, _ layer: Int, scale: Float) -> SIMD3<Float> {
             let t = Float(layer) / Float(layers - 1)
@@ -408,6 +415,7 @@ final class PotteryScene {
             } else {
                 indices += [UInt32(a), UInt32(c), UInt32(b)]
             }
+            faceMaterials.append(currentMaterial)
         }
 
         /// 一面牆（外壁或內壁）：每個頂點的法線由相鄰頂點的差分算出，朝外壁的外側或內壁的軸心側
@@ -443,7 +451,9 @@ final class PotteryScene {
         }
 
         addWall(scale: 1, facingOutward: true)
+        currentMaterial = 1
         addWall(scale: wall, facingOutward: false)
+        currentMaterial = 0
 
         // 口沿：頂層外壁與內壁之間的一圈平面，朝上
         for c0 in strips {
@@ -483,9 +493,11 @@ final class PotteryScene {
         }
 
         addDisc(scale: 1, y: 0, facing: [0, -1, 0])
+        currentMaterial = 1
         addDisc(scale: wall * 0.999, y: baseThickness, facing: [0, 1, 0])
 
         var descriptor = MeshDescriptor(name: "pot")
+        descriptor.materials = .perFace(faceMaterials)
         descriptor.positions = MeshBuffer(positions)
         descriptor.normals = MeshBuffer(normals)
         descriptor.textureCoordinates = MeshBuffer(uvs)

@@ -58,6 +58,9 @@ enum PotteryMaterial {
         }
         material.metallic = .init(floatLiteral: 0)
         material.roughness = .init(floatLiteral: 0.95)
+        // 明確關掉自發光：RealityKit 換材質時，沒設的 emissive 會殘留上一個材質的值（發光切不回來）
+        material.emissiveColor = .init(color: .black)
+        material.emissiveIntensity = 0
 
         switch finish {
         case .matte:
@@ -87,7 +90,8 @@ enum PotteryMaterial {
             } else {
                 material.emissiveColor = .init(color: color)
             }
-            material.emissiveIntensity = 2.0
+            // 有貼圖（尤其照片是白色色調）時 2.0 會過曝成一片白，降低一些
+            material.emissiveIntensity = texture == nil ? 2.0 : 0.45
         }
         if wireframe { material.triangleFillMode = .lines }
         return material
