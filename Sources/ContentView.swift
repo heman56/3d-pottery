@@ -116,7 +116,7 @@ struct ContentView: View {
             .overlay(alignment: .topTrailing) { fileMenu.padding() }
         }
         .fileExporter(isPresented: $showExporter, document: exportFile, contentType: exportType,
-                      defaultFilename: model.fileName ?? Self.defaultName) { result in
+                      defaultFilename: model.fileURL != nil ? (model.fileName ?? Self.defaultName) : Self.defaultName) { result in
             switch result {
             case .success(let url):
                 if exportType == .pottery { didSave(to: url) }
@@ -197,7 +197,7 @@ struct ContentView: View {
                 showExporter = true
             }
         } label: {
-            Image(systemName: "doc.on.doc")
+            Image(systemName: "line.3.horizontal")
                 .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)

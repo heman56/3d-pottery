@@ -1,6 +1,7 @@
 name: PotteryMaster
 options:
   bundleIdPrefix: com.hemanlu
+  developmentLanguage: zh-Hant
   deploymentTarget:
     iOS: "18.0"
 settings:
@@ -20,6 +21,8 @@ targets:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: 製陶大師
+        CFBundleDevelopmentRegion: zh-Hant
+        CFBundleLocalizations: [zh-Hant]
         UILaunchScreen: {}
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: com.hemanlu.pottery
