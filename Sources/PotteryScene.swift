@@ -813,9 +813,192 @@ final class PotteryScene {
                     }
                 }
                 path.stroke()
+            case .bands:
+                for row in stride(from: 0, to: 8, by: 2) {
+                    context.fill(CGRect(x: 0, y: CGFloat(row) * cell, width: width, height: cell))
+                }
+            case .diagonal:
+                // 水平週期 128，高 512 剛好位移 4 個週期，左右接得起來
+                for x0 in stride(from: CGFloat(-512), to: width, by: 128) {
+                    let p = UIBezierPath()
+                    p.move(to: CGPoint(x: x0, y: 0))
+                    p.addLine(to: CGPoint(x: x0 + 64, y: 0))
+                    p.addLine(to: CGPoint(x: x0 + 64 + height, y: height))
+                    p.addLine(to: CGPoint(x: x0 + height, y: height))
+                    p.close()
+                    p.fill()
+                }
+            case .diamonds:
+                for row in 0..<8 {
+                    for column in 0..<16 {
+                        let r = CGRect(x: CGFloat(column) * cell, y: CGFloat(row) * cell, width: cell, height: cell).insetBy(dx: 5, dy: 5)
+                        let p = UIBezierPath()
+                        p.move(to: CGPoint(x: r.midX, y: r.minY))
+                        p.addLine(to: CGPoint(x: r.maxX, y: r.midY))
+                        p.addLine(to: CGPoint(x: r.midX, y: r.maxY))
+                        p.addLine(to: CGPoint(x: r.minX, y: r.midY))
+                        p.close()
+                        if (row + column) % 2 == 0 {
+                            p.fill()
+                        } else {
+                            p.lineWidth = 6
+                            p.stroke()
+                        }
+                    }
+                }
+            case .zigzag:
+                let path = UIBezierPath()
+                path.lineWidth = 14
+                path.lineJoinStyle = .miter
+                for row in 0..<8 {
+                    let baseline = CGFloat(row) * cell + cell / 2
+                    path.move(to: CGPoint(x: 0, y: baseline + 16))
+                    for k in 0..<32 {
+                        path.addLine(to: CGPoint(x: CGFloat(k + 1) * 32, y: baseline + (k % 2 == 0 ? -16 : 16)))
+                    }
+                }
+                path.stroke()
+            case .scales:
+                // 半圓一排一排疊起來，奇數排錯開半格
+                let cg = context.cgContext
+                cg.setLineWidth(7)
+                for r in 0..<17 {
+                    for c in -1..<17 {
+                        let center = CGPoint(x: CGFloat(c) * cell + CGFloat(r % 2) * 32, y: CGFloat(r) * 32 + 16)
+                        let rect = CGRect(x: center.x - 32, y: center.y - 32, width: 64, height: 64)
+                        UIColor.white.setFill()
+                        cg.fillEllipse(in: rect)
+                        cg.strokeEllipse(in: rect.insetBy(dx: 3.5, dy: 3.5))
+                    }
+                }
+            case .hearts:
+                for row in 0..<8 {
+                    for column in 0..<16 {
+                        Self.heart(in: CGRect(x: CGFloat(column) * cell, y: CGFloat(row) * cell, width: cell, height: cell).insetBy(dx: 8, dy: 8)).fill()
+                    }
+                }
+            case .stars:
+                for row in 0..<8 {
+                    for column in 0..<16 {
+                        let center = CGPoint(x: CGFloat(column) * cell + cell / 2, y: CGFloat(row) * cell + cell / 2)
+                        let p = UIBezierPath()
+                        for i in 0..<10 {
+                            let radius: CGFloat = i % 2 == 0 ? 27 : 11
+                            let a = -CGFloat.pi / 2 + CGFloat(i) * .pi / 5
+                            let point = CGPoint(x: center.x + radius * cos(a), y: center.y + radius * sin(a))
+                            if i == 0 { p.move(to: point) } else { p.addLine(to: point) }
+                        }
+                        p.close()
+                        p.fill()
+                    }
+                }
+            case .flowers:
+                let cg = context.cgContext
+                for row in 0..<8 {
+                    for column in 0..<16 {
+                        let center = CGPoint(x: CGFloat(column) * cell + cell / 2, y: CGFloat(row) * cell + cell / 2)
+                        for i in 0..<5 {
+                            let a = -CGFloat.pi / 2 + CGFloat(i) * 2 * .pi / 5
+                            cg.fillEllipse(in: CGRect(x: center.x + 15 * cos(a) - 11, y: center.y + 15 * sin(a) - 11, width: 22, height: 22))
+                        }
+                        UIColor.white.setFill()
+                        cg.fillEllipse(in: CGRect(x: center.x - 6, y: center.y - 6, width: 12, height: 12))
+                        ink.setFill()
+                    }
+                }
+            case .key:
+                // 回紋：方形的螺旋，一格一個
+                let unit = cell / 8
+                let spiral: [(CGFloat, CGFloat)] = [(1, 7), (1, 1), (7, 1), (7, 6), (3, 6), (3, 3), (5, 3), (5, 4)]
+                let p = UIBezierPath()
+                p.lineWidth = 6
+                p.lineJoinStyle = .miter
+                p.lineCapStyle = .square
+                for row in 0..<8 {
+                    for column in 0..<16 {
+                        let origin = CGPoint(x: CGFloat(column) * cell, y: CGFloat(row) * cell)
+                        for (i, point) in spiral.enumerated() {
+                            let q = CGPoint(x: origin.x + point.0 * unit, y: origin.y + point.1 * unit)
+                            if i == 0 { p.move(to: q) } else { p.addLine(to: q) }
+                        }
+                    }
+                }
+                p.stroke()
+            case .rings:
+                let cg = context.cgContext
+                cg.setLineWidth(6)
+                for row in 0..<8 {
+                    for column in 0..<16 {
+                        let center = CGPoint(x: CGFloat(column) * cell + cell / 2, y: CGFloat(row) * cell + cell / 2)
+                        for radius in [CGFloat(26), 15] {
+                            cg.strokeEllipse(in: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
+                        }
+                        cg.fillEllipse(in: CGRect(x: center.x - 5, y: center.y - 5, width: 10, height: 10))
+                    }
+                }
+            case .plaid:
+                // 直條與橫條半透明疊在一起，交叉的地方比較深
+                UIColor(white: 0.66, alpha: 0.5).setFill()
+                for x in stride(from: CGFloat(0), to: width, by: 128) {
+                    context.fill(CGRect(x: x, y: 0, width: 40, height: height))
+                }
+                for y in stride(from: CGFloat(0), to: height, by: 128) {
+                    context.fill(CGRect(x: 0, y: y, width: width, height: 40))
+                }
+                UIColor(white: 0.66, alpha: 1).setFill()
+                for x in stride(from: CGFloat(80), to: width, by: 128) {
+                    context.fill(CGRect(x: x, y: 0, width: 6, height: height))
+                }
+                for y in stride(from: CGFloat(80), to: height, by: 128) {
+                    context.fill(CGRect(x: 0, y: y, width: width, height: 6))
+                }
+            case .leaves:
+                for row in 0..<8 {
+                    for column in 0..<16 {
+                        let center = CGPoint(x: CGFloat(column) * cell + cell / 2, y: CGFloat(row) * cell + cell / 2)
+                        let a = CGPoint(x: center.x - 20, y: center.y + 20), b = CGPoint(x: center.x + 20, y: center.y - 20)
+                        let p = UIBezierPath()
+                        p.move(to: a)
+                        p.addQuadCurve(to: b, controlPoint: CGPoint(x: center.x - 26, y: center.y - 26))
+                        p.addQuadCurve(to: a, controlPoint: CGPoint(x: center.x + 26, y: center.y + 26))
+                        p.fill()
+                        UIColor.white.setStroke()
+                        let vein = UIBezierPath()
+                        vein.move(to: CGPoint(x: center.x - 15, y: center.y + 15))
+                        vein.addLine(to: CGPoint(x: center.x + 12, y: center.y - 12))
+                        vein.lineWidth = 3
+                        vein.stroke()
+                        ink.setStroke()
+                    }
+                }
             }
         }
         return image.cgImage
+    }
+
+    /// 愛心的外框（尖端朝下）
+    private static func heart(in r: CGRect) -> UIBezierPath {
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: r.minX + x * r.width, y: r.minY + y * r.height) }
+        let p = UIBezierPath()
+        p.move(to: point(0.5, 1))
+        p.addCurve(to: point(0, 0.35), controlPoint1: point(0.25, 0.8), controlPoint2: point(0, 0.6))
+        p.addCurve(to: point(0.5, 0.22), controlPoint1: point(0, 0.05), controlPoint2: point(0.4, 0.0))
+        p.addCurve(to: point(1, 0.35), controlPoint1: point(0.6, 0.0), controlPoint2: point(1, 0.05))
+        p.addCurve(to: point(0.5, 1), controlPoint1: point(1, 0.6), controlPoint2: point(0.75, 0.8))
+        p.close()
+        return p
+    }
+
+    private static var thumbnails: [PotteryModel.Pattern: UIImage] = [:]
+
+    /// 花紋選單的小圖：取貼圖左上 4×4 格
+    static func patternThumbnail(_ pattern: PotteryModel.Pattern) -> UIImage? {
+        if pattern == .photo { return nil }
+        if let cached = thumbnails[pattern] { return cached }
+        guard let full = patternImage(pattern), let crop = full.cropping(to: CGRect(x: 0, y: 0, width: 256, height: 256)) else { return nil }
+        let image = UIImage(cgImage: crop)
+        thumbnails[pattern] = image
+        return image
     }
 }
 

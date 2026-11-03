@@ -289,6 +289,39 @@ struct ContentView: View {
         }
     }
 
+    /// 花紋選單：一排可以左右滑的小圖，選到的有咖啡色框
+    private var patternPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(PotteryModel.Pattern.allCases) { pattern in
+                    let selected = model.pattern == pattern
+                    Button { model.setPattern(pattern) } label: {
+                        VStack(spacing: 2) {
+                            Group {
+                                if let thumb = PotteryScene.patternThumbnail(pattern) {
+                                    Image(uiImage: thumb).resizable().interpolation(.medium)
+                                } else {
+                                    Image(systemName: "photo").resizable().scaledToFit().padding(12).foregroundStyle(Self.brown)
+                                }
+                            }
+                            .frame(width: 48, height: 48)
+                            .background(Color.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? Self.brown : Color.gray.opacity(0.4), lineWidth: selected ? 3 : 1))
+                            Text(pattern.title)
+                                .font(.system(size: 12, weight: selected ? .bold : .regular, design: .rounded))
+                                .foregroundStyle(selected ? Self.brown : .secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(pattern.title)
+                }
+            }
+            .padding(.horizontal, 2)
+            .padding(.vertical, 3)
+        }
+    }
+
     /// 標題底部到面板頂端之間才是看得到陶器的地方，把陶器移到那裡的正中央
     private func updateInsets() {
         guard viewHeight > 0, controlsFrame.height > 0 else { return }
@@ -469,15 +502,7 @@ struct ContentView: View {
                 .disabled(model.twist == 0)
             }
 
-            Picker("花紋", selection: Binding(
-                get: { model.pattern },
-                set: { model.setPattern($0) }
-            )) {
-                ForEach(PotteryModel.Pattern.allCases) { pattern in
-                    Text(pattern.title).tag(pattern)
-                }
-            }
-            .pickerStyle(.segmented)
+            patternPicker
 
             if model.pattern == .photo {
                 photoControls

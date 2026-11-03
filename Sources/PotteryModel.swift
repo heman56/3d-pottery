@@ -423,7 +423,7 @@ final class PotteryModel {
 
     /// 釉面上的花紋。貼圖由程式畫出，再乘上釉色
     enum Pattern: String, Codable, CaseIterable, Identifiable, Hashable {
-        case stripes, checker, dots, waves, photo
+        case stripes, checker, dots, waves, bands, diagonal, diamonds, zigzag, scales, hearts, stars, flowers, key, rings, plaid, leaves, photo
 
         var id: Self { self }
 
@@ -433,6 +433,18 @@ final class PotteryModel {
             case .checker: "方格"
             case .dots: "圓點"
             case .waves: "波浪"
+            case .bands: "橫條"
+            case .diagonal: "斜紋"
+            case .diamonds: "菱形"
+            case .zigzag: "鋸齒"
+            case .scales: "魚鱗"
+            case .hearts: "愛心"
+            case .stars: "星星"
+            case .flowers: "花朵"
+            case .key: "回紋"
+            case .rings: "圓圈"
+            case .plaid: "格紋"
+            case .leaves: "葉子"
             case .photo: "照片"
             }
         }
