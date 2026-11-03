@@ -36,6 +36,63 @@ final class PotteryModel {
     var showWireframe = false
     var camera = CameraPose.start
 
+    // MARK: 檔案狀態
+
+    /// 目前作品的檔名（不含副檔名）；還沒存過、也不是開啟的就是 nil
+    private(set) var fileName: String?
+    /// 目前作品存在哪裡；有的話「儲存」直接覆蓋，沒有就要問存哪裡
+    private(set) var fileURL: URL?
+    /// 上次存檔（或開啟）時的樣子；和現在不同就是「有改動還沒存」
+    private var savedMark: Mark?
+
+    /// 作品內容的指紋（形狀、釉色、花紋、質感、照片），用來判斷有沒有改動。
+    /// 照片只比是不是同一張，不比像素
+    struct Mark: Equatable {
+        var radii: [Float]
+        var glaze: Glaze
+        var baseShape: BaseShape
+        var twist: Float
+        var pattern: Pattern
+        var finish: Finish
+        var ridges: Bool
+        var tilesAround: Int
+        var tilesUp: Int
+        var photo: ObjectIdentifier?
+    }
+
+    var mark: Mark {
+        Mark(radii: radii, glaze: glaze, baseShape: baseShape, twist: twist, pattern: pattern, finish: finish,
+             ridges: ridges, tilesAround: tilesAround, tilesUp: tilesUp, photo: photo.map(ObjectIdentifier.init))
+    }
+
+    /// 有改動還沒存。退回到存檔時的樣子就又算沒改動
+    var isDirty: Bool { mark != savedMark }
+
+    init() { savedMark = mark }
+
+    /// 存好了（或剛開啟）：記下檔名與位置，並把現在的樣子當作已存
+    func markSaved(name: String?, url: URL?) {
+        fileName = name
+        fileURL = url
+        savedMark = mark
+    }
+
+    /// 全新的泥團。前一件作品進復原紀錄，按錯還可以退回
+    func startNew() {
+        record(snapshot)
+        radii = Preset.clay.radii
+        baseShape = .circle
+        twist = 0
+        glaze = .clay
+        pattern = .stripes
+        finish = .matte
+        ridges = true
+        photo = nil
+        tilesAround = 4
+        tilesUp = 2
+        markSaved(name: nil, url: nil)
+    }
+
     enum Mode { case sculpt, look }
 
     // MARK: 復原 / 重做
@@ -159,7 +216,8 @@ final class PotteryModel {
     }
 
     /// 載入作品。載入前的樣子進復原紀錄，讀錯檔可以退回；照片不進紀錄（和 setPhoto 一樣）
-    func load(_ document: PotteryDocument) {
+    /// saved 為 false 時（接續自動暫存的作品）仍算「有改動還沒存」
+    func load(_ document: PotteryDocument, name: String? = nil, url: URL? = nil, saved: Bool = true) {
         record(snapshot)
         radii = document.radii.map { min(max($0, Self.minRadius), Self.maxRadius) }
         baseShape = document.baseShape
@@ -172,6 +230,9 @@ final class PotteryModel {
         photo = document.photo.flatMap { UIImage(data: $0) }
         // 沒有照片就不能停在「照片」花紋
         pattern = (document.pattern == .photo && photo == nil) ? .stripes : document.pattern
+        fileName = name
+        fileURL = url
+        savedMark = saved ? mark : nil
     }
 
     /// 多邊形轉角的圓弧倒角：從頂點往兩邊各退「邊長的這個比例」開始彎

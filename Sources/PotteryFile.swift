@@ -70,3 +70,33 @@ struct PotteryFile: FileDocument {
         FileWrapper(regularFileWithContents: data)
     }
 }
+
+/// 自動暫存：App 進背景或隔一段時間，把還沒存的作品寫進 App 自己的資料夾，下次開啟時問要不要接續
+enum Autosave {
+    struct Record: Codable {
+        var name: String?
+        var document: PotteryDocument
+    }
+
+    private static var url: URL? {
+        guard let dir = try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                                     appropriateFor: nil, create: true) else { return nil }
+        return dir.appendingPathComponent("autosave.pottery")
+    }
+
+    static func write(name: String?, document: PotteryDocument) {
+        guard let url, let data = try? JSONEncoder().encode(Record(name: name, document: document)) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    static func read() -> Record? {
+        guard let url, let data = try? Data(contentsOf: url),
+              let record = try? JSONDecoder().decode(Record.self, from: data),
+              (try? PotteryDocument.decode(try JSONEncoder().encode(record.document))) != nil else { return nil }
+        return record
+    }
+
+    static func remove() {
+        if let url { try? FileManager.default.removeItem(at: url) }
+    }
+}

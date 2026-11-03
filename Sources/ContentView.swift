@@ -16,6 +16,16 @@ struct ContentView: View {
     @State private var showExporter = false
     @State private var showImporter = false
     @State private var fileMessage: String?
+    @Environment(\.scenePhase) private var scenePhase
+    /// 有未存檔的改動時，開啟或新作品之前先問
+    private enum PendingAction { case open, new }
+    @State private var pendingAction: PendingAction?
+    @State private var askUnsaved = false
+    /// 先存檔、存好再做的動作
+    @State private var afterSave: PendingAction?
+    /// 上次沒存的作品（自動暫存）；有值時問使用者要不要接續
+    @State private var restoreRecord: Autosave.Record?
+    @State private var lastAutosave: PotteryModel.Mark?
     @State private var viewHeight: CGFloat = 0
     @State private var headerFrame = CGRect.zero
     @State private var controlsFrame = CGRect.zero
@@ -70,6 +80,11 @@ struct ContentView: View {
                         .font(.system(size: 34, weight: .heavy, design: .rounded))
                     Text(hint)
                         .font(.system(.title3, design: .rounded, weight: .medium))
+                    if model.fileName != nil || model.isDirty {
+                        Text("\(model.fileName ?? "未命名")\(model.isDirty ? " •" : "")")
+                            .font(.system(.callout, design: .rounded, weight: .medium))
+                            .opacity(0.75)
+                    }
                 }
                 .foregroundStyle(Self.brown)
                 .allowsHitTesting(false)
@@ -100,9 +115,50 @@ struct ContentView: View {
             .overlay(alignment: .topTrailing) { fileMenu.padding() }
         }
         .fileExporter(isPresented: $showExporter, document: exportFile, contentType: exportType,
-                      defaultFilename: "我的陶器") { result in
-            if case .failure(let error) = result { fileMessage = "存檔失敗：\(error.localizedDescription)" }
+                      defaultFilename: model.fileName ?? Self.defaultName) { result in
+            switch result {
+            case .success(let url):
+                if exportType == .pottery { didSave(to: url) }
+            case .failure(let error):
+                afterSave = nil
+                if (error as? CocoaError)?.code != .userCancelled { fileMessage = "存檔失敗：\(error.localizedDescription)" }
+            }
         }
+        .confirmationDialog("目前的作品還沒存檔", isPresented: $askUnsaved, titleVisibility: .visible) {
+            Button("儲存") {
+                afterSave = pendingAction
+                save()
+            }
+            Button("不存檔", role: .destructive) {
+                if let action = pendingAction { perform(action) }
+            }
+            Button("取消", role: .cancel) { pendingAction = nil }
+        } message: {
+            Text("要先存起來嗎？")
+        }
+        .alert("上次的作品還沒存檔", isPresented: Binding(get: { restoreRecord != nil }, set: { _ in })) {
+            Button("接續") {
+                if let record = restoreRecord {
+                    model.load(record.document, name: record.name, saved: false)
+                    restoreRecord = nil
+                }
+            }
+            Button("重新開始", role: .destructive) {
+                Autosave.remove()
+                restoreRecord = nil
+            }
+        } message: {
+            Text("要接著做上次的陶器嗎？")
+        }
+        .task {
+            restoreRecord = Autosave.read()
+            // 隔一段時間暫存一次，App 當掉或被系統收掉也不會全部丟失
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                autosave()
+            }
+        }
+        .onChange(of: scenePhase) { if scenePhase != .active { autosave() } }
         .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pottery]) { result in
             openPottery(result)
         }
@@ -115,16 +171,18 @@ struct ContentView: View {
 
     // MARK: 存檔／匯出
 
+    private static var defaultName: String {
+        "陶器 " + Date.now.formatted(.iso8601.year().month().day())
+    }
+
     /// 右上角的「檔案」選單：存成 .pottery（可以再載入）、開啟、匯出 .glb（給 Blender 等軟體）
     private var fileMenu: some View {
         Menu {
-            Button("儲存作品（.pottery）", systemImage: "square.and.arrow.down") {
-                guard let data = try? model.makeDocument().encoded() else { return }
-                exportFile = PotteryFile(data: data)
-                exportType = .pottery
-                showExporter = true
-            }
-            Button("開啟作品…", systemImage: "folder") { showImporter = true }
+            Button("新作品", systemImage: "plus") { request(.new) }
+            Button("開啟作品…", systemImage: "folder") { request(.open) }
+            Divider()
+            Button("儲存", systemImage: "square.and.arrow.down") { save() }
+            Button("另存新檔…", systemImage: "square.and.arrow.down.on.square") { saveAs() }
             Divider()
             Button("匯出 3D 模型（.glb）", systemImage: "cube") {
                 let input = GLBExport.Input(spec: model.spec, glaze: model.glaze, pattern: model.pattern,
@@ -147,13 +205,85 @@ struct ContentView: View {
         .accessibilityLabel("檔案")
     }
 
+    /// 開啟、新作品：有沒存的改動就先問
+    private func request(_ action: PendingAction) {
+        if model.isDirty {
+            pendingAction = action
+            askUnsaved = true
+        } else {
+            perform(action)
+        }
+    }
+
+    private func perform(_ action: PendingAction) {
+        pendingAction = nil
+        switch action {
+        case .open: showImporter = true
+        case .new:
+            model.startNew()
+            Autosave.remove()
+            lastAutosave = nil
+        }
+    }
+
+    /// 儲存：已經有檔案位置就直接覆蓋，否則（或寫入失敗）問存哪裡
+    private func save() {
+        guard let url = model.fileURL, let data = try? model.makeDocument().encoded() else {
+            saveAs()
+            return
+        }
+        let granted = url.startAccessingSecurityScopedResource()
+        defer { if granted { url.stopAccessingSecurityScopedResource() } }
+        do {
+            try data.write(to: url)
+            didSave(to: url)
+        } catch {
+            saveAs()
+        }
+    }
+
+    private func saveAs() {
+        guard let data = try? model.makeDocument().encoded() else { return }
+        exportFile = PotteryFile(data: data)
+        exportType = .pottery
+        showExporter = true
+    }
+
+    private func didSave(to url: URL) {
+        model.markSaved(name: url.deletingPathExtension().lastPathComponent, url: url)
+        Autosave.remove()
+        lastAutosave = nil
+        if let action = afterSave {
+            afterSave = nil
+            perform(action)
+        }
+    }
+
+    /// 有改動就暫存；回到沒改動（存檔或退回到存檔時的樣子）就清掉暫存。
+    /// 還在問「要不要接續上次的作品」時不動，免得蓋掉
+    private func autosave() {
+        guard restoreRecord == nil else { return }
+        if model.isDirty {
+            let mark = model.mark
+            guard mark != lastAutosave else { return }
+            Autosave.write(name: model.fileName, document: model.makeDocument())
+            lastAutosave = mark
+        } else if lastAutosave != nil {
+            Autosave.remove()
+            lastAutosave = nil
+        }
+    }
+
     private func openPottery(_ result: Result<URL, Error>) {
         do {
             let url = try result.get()
             // 從「檔案」App 選到的檔案在 App 外面，要先取得存取權
             let granted = url.startAccessingSecurityScopedResource()
             defer { if granted { url.stopAccessingSecurityScopedResource() } }
-            model.load(try PotteryDocument.decode(try Data(contentsOf: url)))
+            let document = try PotteryDocument.decode(try Data(contentsOf: url))
+            model.load(document, name: url.deletingPathExtension().lastPathComponent, url: url)
+            Autosave.remove()
+            lastAutosave = nil
         } catch {
             fileMessage = "開啟失敗：\(error.localizedDescription)"
         }
