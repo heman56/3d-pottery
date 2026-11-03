@@ -19,6 +19,8 @@ final class PotteryScene {
     private var pattern = PotteryModel.Pattern.stripes
     private var wireframe = false
     private var finish = Finish.matte
+    private var ridges = false
+    private var ridgeNormalMap: TextureResource?
     private var interiorMaterial: any RealityKit.Material = PotteryMaterial.make(color: .darkGray, finish: .matte, wireframe: false, texture: nil)
     private var material: any RealityKit.Material = PotteryMaterial.make(color: .brown, finish: .matte, wireframe: false, texture: nil)
     /// 環境光（IBL）的來源：只有真機與 Mac 版會用到（Intel 模擬器的光照材質會當機）
@@ -205,6 +207,9 @@ final class PotteryScene {
            let texture = try? await TextureResource(image: image, withName: nil, options: .init(semantic: .color)) {
             disc.model?.materials = [PotteryMaterial.make(color: .white, finish: .matte, wireframe: false, texture: texture)]
         }
+        if let image = PotteryMaterial.ridgeNormalImage() {
+            ridgeNormalMap = try? await TextureResource(image: image, withName: nil, options: .init(semantic: .normal))
+        }
         await loadEnvironment()
         refreshMaterials()
     }
@@ -219,6 +224,11 @@ final class PotteryScene {
             entity.components.set(ImageBasedLightReceiverComponent(imageBasedLight: lightSource))
         }
         #endif
+    }
+
+    func setRidges(_ on: Bool) {
+        ridges = on
+        refreshMaterials()
     }
 
     func setFinish(_ finish: Finish) {
@@ -265,7 +275,8 @@ final class PotteryScene {
         let usePhoto = pattern == .photo && photoTexture != nil
         let color = wireframe ? glaze.color.shaded(by: 0.55) : (usePhoto ? UIColor.white : glaze.color)
         let texture = wireframe ? nil : (usePhoto ? photoTexture : textures[pattern])
-        material = PotteryMaterial.make(color: color, finish: finish, wireframe: wireframe, texture: texture)
+        material = PotteryMaterial.make(color: color, finish: finish, wireframe: wireframe, texture: texture,
+                                          normalMap: ridges && !wireframe ? ridgeNormalMap : nil)
         // 內側：同釉色的深色素面，不上釉（不受質感與花紋影響）
         let interiorColor = wireframe ? color : glaze.color.shaded(by: 0.5)
         interiorMaterial = PotteryMaterial.make(color: interiorColor, finish: .matte, wireframe: wireframe, texture: nil)
@@ -375,6 +386,8 @@ final class PotteryScene {
         var uvs: [SIMD2<Float>] = []
         var indices: [UInt32] = []
         // 每個三角形用哪個材質：0 是外側（上釉、有花紋），1 是內側（深色素面，不上釉）
+        var tangents: [SIMD3<Float>] = []
+        var bitangents: [SIMD3<Float>] = []
         var faceMaterials: [UInt32] = []
         var currentMaterial: UInt32 = 0
 
@@ -438,6 +451,9 @@ final class PotteryScene {
                     positions.append(p)
                     normals.append(n)
                     uvs.append(uv(c, i))
+                    // 法線貼圖要用：u 方向是繞一圈（around），v 方向是往口沿（along）
+                    tangents.append(simd_length(around) > 1e-9 ? simd_normalize(around) : [1, 0, 0])
+                    bitangents.append(simd_length(along) > 1e-9 ? simd_normalize(along) : [0, 1, 0])
                 }
             }
             for c0 in strips {
@@ -467,6 +483,8 @@ final class PotteryScene {
             for corner in corners {
                 positions.append(corner)
                 normals.append([0, 1, 0])
+                tangents.append([1, 0, 0])
+                bitangents.append([0, 0, 1])
                 uvs.append([(columns[c0].patternU + columns[c1].patternU) / 2, 1])
             }
             addTriangle(first, first + 1, first + 2, facing: [0, 1, 0])
@@ -479,12 +497,16 @@ final class PotteryScene {
             let extent = max(spec.radii[0] * scale, 0.001)
             positions.append([0, y, 0])
             normals.append(facing)
+            tangents.append([1, 0, 0])
+            bitangents.append([0, 0, 1])
             uvs.append([0.5, 0.5])
             for c in columns.indices {
                 var p = point(c, 0, scale: scale)
                 p.y = y
                 positions.append(p)
                 normals.append(facing)
+                tangents.append([1, 0, 0])
+                bitangents.append([0, 0, 1])
                 uvs.append([0.5 + 0.5 * p.x / extent, 0.5 + 0.5 * p.z / extent])
             }
             for c0 in strips {
@@ -500,6 +522,8 @@ final class PotteryScene {
         descriptor.materials = .perFace(faceMaterials)
         descriptor.positions = MeshBuffer(positions)
         descriptor.normals = MeshBuffer(normals)
+        descriptor.tangents = MeshBuffer(tangents)
+        descriptor.bitangents = MeshBuffer(bitangents)
         descriptor.textureCoordinates = MeshBuffer(uvs)
         descriptor.primitives = .triangles(indices)
         return try? MeshResource.generate(from: [descriptor])

@@ -53,6 +53,38 @@ func render() async throws {
             renderer.entities.append(ball)
         }
     }
+    // RIDGES=1：另外放一根帶 tangents 的圓柱，貼拉坯紋法線貼圖，檢查凹凸有沒有出來
+    if ProcessInfo.processInfo.environment["RIDGES"] != nil, let image = PotteryMaterial.ridgeNormalImage() {
+        let normalMap = try await TextureResource(image: image, withName: nil, options: .init(semantic: .normal))
+        var positions: [SIMD3<Float>] = [], normals: [SIMD3<Float>] = [], tangents: [SIMD3<Float>] = []
+        var bitangents: [SIMD3<Float>] = [], uvs: [SIMD2<Float>] = [], indices: [UInt32] = []
+        let segments = 48
+        for k in 0...segments {
+            let u = Float(k) / Float(segments), a = 2 * Float.pi * u
+            for j in 0...1 {
+                positions.append([0.1 * cos(a), Float(j) * 0.5 - 0.25, -0.1 * sin(a)])
+                normals.append([cos(a), 0, -sin(a)])
+                tangents.append([-sin(a), 0, -cos(a)])
+                bitangents.append([0, 1, 0])
+                uvs.append([u, Float(j)])
+            }
+        }
+        for k in 0..<segments {
+            let a = UInt32(2 * k)
+            indices += [a, a + 2, a + 1, a + 1, a + 2, a + 3]
+        }
+        var descriptor = MeshDescriptor(name: "cylinder")
+        descriptor.positions = MeshBuffer(positions)
+        descriptor.normals = MeshBuffer(normals)
+        descriptor.tangents = MeshBuffer(tangents)
+        descriptor.bitangents = MeshBuffer(bitangents)
+        descriptor.textureCoordinates = MeshBuffer(uvs)
+        descriptor.primitives = .triangles(indices)
+        let cylinder = ModelEntity(mesh: try .generate(from: [descriptor]),
+                                   materials: [PotteryMaterial.make(color: PlatformColor(red: 0.72, green: 0.45, blue: 0.30, alpha: 1), finish: .glossy, wireframe: false, texture: nil, normalMap: normalMap)])
+        cylinder.position = [0, 0, 0.5]
+        renderer.entities.append(cylinder)
+    }
     // 背後放一塊米色底板，才看得出琉璃（半透明）
     let backdrop = ModelEntity(
         mesh: .generatePlane(width: 3, height: 2),

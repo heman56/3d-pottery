@@ -20,6 +20,7 @@ final class PotteryModel {
     private(set) var twist: Float = 0
     private(set) var pattern: Pattern = .stripes
     private(set) var finish: Finish = .matte
+    private(set) var ridges = false
     /// 貼滿陶器外面的照片（只有「照片」花紋會用到）。照片會被縮放成「繞一圈 tilesAround 張、
     /// 從底到口 tilesUp 張」，張數都是整數，所以四方連續的圖案接得起來
     private(set) var photo: UIImage?
@@ -46,6 +47,7 @@ final class PotteryModel {
         var twist: Float
         var pattern: Pattern
         var finish: Finish
+        var ridges: Bool
         var tilesAround: Int
         var tilesUp: Int
     }
@@ -60,7 +62,7 @@ final class PotteryModel {
     var canRedo: Bool { !redoStack.isEmpty }
 
     private var snapshot: Snapshot {
-        Snapshot(radii: radii, glaze: glaze, baseShape: baseShape, twist: twist, pattern: pattern, finish: finish,
+        Snapshot(radii: radii, glaze: glaze, baseShape: baseShape, twist: twist, pattern: pattern, finish: finish, ridges: ridges,
                  tilesAround: tilesAround, tilesUp: tilesUp)
     }
 
@@ -71,6 +73,7 @@ final class PotteryModel {
         twist = s.twist
         pattern = s.pattern
         finish = s.finish
+        ridges = s.ridges
         tilesAround = s.tilesAround
         tilesUp = s.tilesUp
     }
@@ -151,6 +154,12 @@ final class PotteryModel {
         guard newFinish != finish else { return }
         record(snapshot)
         finish = newFinish
+    }
+
+    func setRidges(_ on: Bool) {
+        guard on != ridges else { return }
+        record(snapshot)
+        ridges = on
     }
 
     func setPattern(_ newPattern: Pattern) {

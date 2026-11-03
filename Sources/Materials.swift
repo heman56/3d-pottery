@@ -1,5 +1,7 @@
 import RealityKit
 import Foundation
+import CoreGraphics
+import simd
 #if canImport(UIKit)
 import UIKit
 typealias PlatformColor = UIColor
@@ -30,7 +32,7 @@ enum Finish: CaseIterable, Identifiable, Hashable {
 enum PotteryMaterial {
     /// 依釉色（color）、質感（finish）做出材質。texture 是花紋或照片，會和 color 相乘。
     /// PhysicallyBasedMaterial 是 struct，指定時會複製一份，所以下面每種質感都是在同一份基本設定上改幾個屬性
-    static func make(color: PlatformColor, finish: Finish, wireframe: Bool, texture: TextureResource?) -> any Material {
+    static func make(color: PlatformColor, finish: Finish, wireframe: Bool, texture: TextureResource?, normalMap: TextureResource? = nil) -> any Material {
         #if targetEnvironment(simulator)
         // Intel 模擬器編譯光照材質會當機，改用不受光照影響的 UnlitMaterial，並用顏色與透明度做近似
         var material: UnlitMaterial
@@ -55,6 +57,10 @@ enum PotteryMaterial {
             material.baseColor = .init(tint: color, texture: .init(texture))
         } else {
             material.baseColor = .init(tint: color)
+        }
+        // 法線貼圖（拉坯紋）：只改變受光的方向，不改幾何；需要網格提供 tangents
+        if let normalMap {
+            material.normal = .init(texture: .init(normalMap))
         }
         material.metallic = .init(floatLiteral: 0)
         material.roughness = .init(floatLiteral: 0.95)
@@ -96,6 +102,33 @@ enum PotteryMaterial {
         if wireframe { material.triangleFillMode = .lines }
         return material
         #endif
+    }
+
+    /// 拉坯紋的法線貼圖：一圈圈水平的凹凸（沿 v 方向起伏、沿 u 方向不變），
+    /// 兩個不同頻率疊在一起，看起來不會太整齊。頻率取整數，v 從 0 到 1 剛好接得起來。
+    /// 法線 = 高度的斜率換成顏色（0.5 代表不偏）
+    static func ridgeNormalImage() -> CGImage? {
+        let width = 8, height = 512
+        let strength: Float = 1.1
+        var pixels = [UInt8](repeating: 255, count: width * height * 4)
+        for y in 0..<height {
+            let v = Float(y) / Float(height)
+            let twoPi = 2 * Float.pi
+            // 高度 h(v) = sin(2π·18v) + 0.45·sin(2π·47v + 1)，這裡直接寫成斜率 dh/dv
+            let slope = twoPi * 18 * cos(twoPi * 18 * v) + 0.45 * twoPi * 47 * cos(twoPi * 47 * v + 1)
+            let n = simd_normalize(SIMD3<Float>(0, -slope * strength / 400, 1))
+            for x in 0..<width {
+                let i = (y * width + x) * 4
+                pixels[i] = UInt8((n.x * 0.5 + 0.5) * 255)
+                pixels[i + 1] = UInt8((n.y * 0.5 + 0.5) * 255)
+                pixels[i + 2] = UInt8((n.z * 0.5 + 0.5) * 255)
+            }
+        }
+        let provider = CGDataProvider(data: Data(pixels) as CFData)!
+        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+                       space: CGColorSpaceCreateDeviceRGB(),
+                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
 }
 
