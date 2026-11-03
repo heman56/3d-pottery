@@ -137,7 +137,7 @@ final class PotteryModel {
         guard let photo, photo.size.height > 0 else { return }
         let aspect = Float(photo.size.width / photo.size.height)
         let sides = baseShape.sides
-        let perimeterUnit: Float = sides == 0 ? 2 * .pi : Float(sides) * 2 * sin(.pi / Float(sides))
+        let perimeterUnit = Self.outlinePerimeter(sides: sides)
         let meanCircumference = radii.reduce(0, +) / Float(radii.count) * perimeterUnit
         var profileLength: Float = 0
         for i in 1..<radii.count {
@@ -148,6 +148,20 @@ final class PotteryModel {
         let tileWidth = meanCircumference / Float(tilesAround)
         let tileHeight = tileWidth / aspect
         tilesUp = min(max(Int((profileLength / tileHeight).rounded()), 1), Self.maxTiles)
+    }
+
+    /// 多邊形轉角的圓弧倒角：從頂點往兩邊各退「邊長的這個比例」開始彎
+    static let cornerRounding: Float = 0.22
+
+    /// 外接圓半徑為 1 的底面輪廓周長（含倒角）。圓形是 2π；
+    /// 多邊形：每邊剩下直線 e - 2d，每個轉角是半徑 ρ = d / tan(π/n)、張角 2π/n 的圓弧
+    static func outlinePerimeter(sides: Int) -> Float {
+        guard sides > 0 else { return 2 * .pi }
+        let n = Float(sides)
+        let edge = 2 * sin(Float.pi / n)
+        let d = cornerRounding * edge
+        let rho = d / tan(Float.pi / n)
+        return n * (edge - 2 * d) + 2 * Float.pi * rho
     }
 
     func setFinish(_ newFinish: Finish) {

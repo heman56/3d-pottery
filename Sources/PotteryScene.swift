@@ -374,8 +374,9 @@ final class PotteryScene {
 
     /// 底面輪廓上的「欄」：每欄是一條從底到口的頂點線，相鄰的欄之間成一片牆。
     /// 欄的位置用沿周長的比例 t 表示：t = 0 與 1 在陶器背面（接縫，頂點重複），t = 0.5 在貼紙正中央。
-    /// 圓形整圈共用頂點；多邊形每個面各自成「段」，段與段不共用頂點，所以每個面有自己的法線（平面），
-    /// 每個面再細分，貼紙跨過很大的面時才不會被拉歪
+    /// 多邊形的輪廓是「直線 + 圓弧倒角」交替；直線與圓弧各自成「段」，段與段之間頂點重複，
+    /// 法線各算各的，所以平面保持平、轉角圓滑；兩段交界處的切線相同，看不出接縫。
+    /// 花紋與照片的 u 沿整圈連續（t），不再每個面重來
     private struct Column {
         var unit: SIMD2<Float>   // 外接圓半徑為 1 時，輪廓上的位置（局部座標）
         var t: Float
@@ -384,7 +385,6 @@ final class PotteryScene {
     }
 
     private static let columnsAround = 96     // 繞一圈約幾欄
-    private static let patternCellsAround = 16 // 花紋貼圖橫向一圈的格數
 
     private static func makeColumns(sides: Int) -> [Column] {
         if sides == 0 {
@@ -394,39 +394,78 @@ final class PotteryScene {
                 return Column(unit: [cos(a), sin(a)], t: t, patternU: t, segment: 0)
             }
         }
-        let faceSpan = 1 / Float(sides)
-        // 每個面只佔花紋貼圖的一小段（約 16 / 邊數 格），格子才不會被拉成細長條
-        let cellsPerFace = max(1, Int((Double(patternCellsAround) / Double(sides)).rounded()))
-        let faceU = Float(cellsPerFace) / Float(patternCellsAround)
-        func vertex(_ k: Int) -> SIMD2<Float> {
-            let a = Float(vertexAngle(k % sides, sides: sides, count: sides))
-            return [cos(a), sin(a)]
+        let n = sides
+        let nf = Float(n)
+        let corner = 2 * Float.pi / nf                  // 每個轉角圓弧的張角
+        let edge = 2 * sin(Float.pi / nf)
+        let d = PotteryModel.cornerRounding * edge      // 倒角從頂點往兩邊退的長度
+        let rho = d / tan(Float.pi / nf)                // 圓弧半徑
+        let straight = edge - 2 * d                     // 每邊剩下的直線長度
+        let arc = rho * corner
+        let perimeter = PotteryModel.outlinePerimeter(sides: n)
+
+        func vertexAngle(_ k: Int) -> Float { Float(PotteryScene.vertexAngle(k % n, sides: n, count: n)) }
+        func vertex(_ k: Int) -> SIMD2<Float> { [cos(vertexAngle(k)), sin(vertexAngle(k))] }
+        /// 第 k 面（頂點 k 到 k + 1）直線部分上的位置，λ = 0…1
+        func straightPoint(_ k: Int, _ lambda: Float) -> SIMD2<Float> {
+            let dir = (vertex(k + 1) - vertex(k)) / edge
+            return vertex(k) + dir * (d + straight * lambda)
+        }
+        /// 頂點 j 的圓弧上的位置，λ = 0…1（逆時針）
+        func arcPoint(_ j: Int, _ lambda: Float) -> SIMD2<Float> {
+            let phi = vertexAngle(j)
+            let center = vertex(j) * (1 - rho / cos(Float.pi / nf))
+            let psi = phi - Float.pi / nf + corner * lambda
+            return center + rho * SIMD2<Float>(cos(psi), sin(psi))
         }
 
-        var columns: [Column] = []
-        var segment = 0
-        for face in 0..<sides {
-            // 第 0 面的正中央對到 t = 0.5
-            let low = 0.5 - 0.5 * faceSpan + Float(face) * faceSpan
-            let high = low + faceSpan
-            // (起點, 終點, 參考點)：參考點是這個面在「展開的 t」上的起點，用來算面內的位置 λ
-            var pieces: [(Float, Float, Float)]
-            if low >= 1 {
-                pieces = [(low - 1, high - 1, low - 1)]
-            } else if high > 1 {
-                pieces = [(low, 1, low), (0, high - 1, low - 1)]   // 跨過接縫的面切成兩段
+        // 從第 0 面的正中央出發，逆時針走一圈；s 是走過的路程
+        struct Piece { var start: Float; var length: Float; var point: (Float) -> SIMD2<Float> }
+        var pieces: [Piece] = []
+        var s: Float = 0
+        pieces.append(Piece(start: s, length: straight / 2, point: { straightPoint(0, 0.5 + 0.5 * $0) }))
+        s += straight / 2
+        for k in 1...n {
+            let j = k
+            pieces.append(Piece(start: s, length: arc, point: { arcPoint(j, $0) }))
+            s += arc
+            if k < n {
+                pieces.append(Piece(start: s, length: straight, point: { straightPoint(j, $0) }))
+                s += straight
             } else {
-                pieces = [(low, high, low)]
+                pieces.append(Piece(start: s, length: straight / 2, point: { straightPoint(0, 0.5 * $0) }))
+                s += straight / 2
             }
-            for (start, end, reference) in pieces where end - start > 1e-5 {
-                let count = max(2, Int((Float(columnsAround) * (end - start)).rounded(.up)))
-                for j in 0...count {
-                    let t = start + (end - start) * Float(j) / Float(count)
-                    let lambda = min(max((t - reference) / faceSpan, 0), 1)
-                    let unit = vertex(face) + (vertex(face + 1) - vertex(face)) * lambda
-                    columns.append(Column(unit: unit, t: t, patternU: faceU * lambda, segment: segment))
-                }
-                segment += 1
+        }
+
+        // s → t：第 0 面中央對到 t = 0.5，跨過 t = 1 的那一段切成兩段，接縫在背面
+        struct Run { var t0: Float; var t1: Float; var u0: Float; var u1: Float; var piece: Int }
+        var runs: [Run] = []
+        for (index, piece) in pieces.enumerated() {
+            let t0 = piece.start / perimeter + 0.5
+            let t1 = (piece.start + piece.length) / perimeter + 0.5
+            if t0 >= 1 {
+                runs.append(Run(t0: t0 - 1, t1: t1 - 1, u0: 0, u1: 1, piece: index))
+            } else if t1 > 1 {
+                let mid = (1 - t0) / (t1 - t0)
+                runs.append(Run(t0: t0, t1: 1, u0: 0, u1: mid, piece: index))
+                runs.append(Run(t0: 0, t1: t1 - 1, u0: mid, u1: 1, piece: index))
+            } else {
+                runs.append(Run(t0: t0, t1: t1, u0: 0, u1: 1, piece: index))
+            }
+        }
+        runs.sort { $0.t0 < $1.t0 }
+
+        var columns: [Column] = []
+        for (segment, run) in runs.enumerated() where run.t1 - run.t0 > 1e-6 {
+            let isArc = run.piece % 2 == 1   // pieces 依序是 直線、圓弧、直線、…，圓弧都在奇數位
+            let minimum = isArc ? 6 : 2
+            let count = max(minimum, Int((Float(columnsAround) * (run.t1 - run.t0)).rounded(.up)))
+            for j in 0...count {
+                let f = Float(j) / Float(count)
+                let t = run.t0 + (run.t1 - run.t0) * f
+                let unit = pieces[run.piece].point(run.u0 + (run.u1 - run.u0) * f)
+                columns.append(Column(unit: unit, t: t, patternU: t, segment: segment))
             }
         }
         return columns
@@ -593,15 +632,18 @@ final class PotteryScene {
 
     /// 模擬器專用：蓋在開口上的深色薄片（世界座標，已含頂層的扭轉角度）
     private static func makeCap(_ spec: VesselSpec) -> MeshResource? {
-        let count = spec.sides == 0 ? 48 : spec.sides
+        // 輪廓與陶壁相同（含圓弧倒角）；欄是頭尾重複的一圈，扇形的三角形就沿著它排
+        let outline = makeColumns(sides: spec.sides).map(\.unit)
         let radius = spec.radii[spec.radii.count - 1] * wall * 0.98
         let y = PotteryModel.height - 0.002
+        let cosTwist = cos(spec.twist), sinTwist = sin(spec.twist)
         var positions: [SIMD3<Float>] = [[0, y, 0]]
         var indices: [UInt32] = []
-        for k in 0..<count {
-            let a = Float(vertexAngle(k, sides: spec.sides, count: count)) + spec.twist
-            positions.append([radius * cos(a), y, -radius * sin(a)])
-            indices += [0, UInt32(1 + k), UInt32(1 + (k + 1) % count)]
+        for (k, unit) in outline.enumerated() {
+            let x = unit.x * cosTwist - unit.y * sinTwist
+            let z = unit.x * sinTwist + unit.y * cosTwist
+            positions.append([radius * x, y, -radius * z])
+            if k > 0 { indices += [0, UInt32(k), UInt32(k + 1)] }
         }
         var descriptor = MeshDescriptor(name: "cap")
         descriptor.positions = MeshBuffer(positions)
