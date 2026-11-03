@@ -59,9 +59,8 @@ enum PotteryMaterial {
             material.baseColor = .init(tint: color)
         }
         // 法線貼圖（拉坯紋）：只改變受光的方向，不改幾何；需要網格提供 tangents
-        if let normalMap {
-            material.normal = .init(texture: .init(normalMap))
-        }
+        // 沒有法線貼圖時也要明確指定：RealityKit 換材質時，沒設的屬性會殘留上一個材質的值（拉坯紋關不掉）
+        material.normal = normalMap.map { .init(texture: .init($0)) } ?? .init()
         material.metallic = .init(floatLiteral: 0)
         material.roughness = .init(floatLiteral: 0.95)
         // 明確關掉自發光：RealityKit 換材質時，沒設的 emissive 會殘留上一個材質的值（發光切不回來）
@@ -104,19 +103,17 @@ enum PotteryMaterial {
         #endif
     }
 
-    /// 拉坯紋的法線貼圖：一圈圈水平的凹凸（沿 v 方向起伏、沿 u 方向不變），
+    /// 拉坯紋的法線貼圖：一圈圈水平的細紋（沿 v 方向起伏、沿 u 方向不變），
     /// 兩個不同頻率疊在一起，看起來不會太整齊。頻率取整數，v 從 0 到 1 剛好接得起來。
-    /// 法線 = 高度的斜率換成顏色（0.5 代表不偏）
+    /// 法線 = 高度的斜率換成顏色（0.5 代表不偏）；斜率直接寫成傾斜量（約 0.3 ≈ 17°），不隨頻率變大
     static func ridgeNormalImage() -> CGImage? {
-        let width = 8, height = 512
-        let strength: Float = 1.1
+        let width = 8, height = 1024
         var pixels = [UInt8](repeating: 255, count: width * height * 4)
         for y in 0..<height {
             let v = Float(y) / Float(height)
             let twoPi = 2 * Float.pi
-            // 高度 h(v) = sin(2π·18v) + 0.45·sin(2π·47v + 1)，這裡直接寫成斜率 dh/dv
-            let slope = twoPi * 18 * cos(twoPi * 18 * v) + 0.45 * twoPi * 47 * cos(twoPi * 47 * v + 1)
-            let n = simd_normalize(SIMD3<Float>(0, -slope * strength / 400, 1))
+            let tilt = 0.3 * cos(twoPi * 40 * v) + 0.18 * cos(twoPi * 103 * v + 1)
+            let n = simd_normalize(SIMD3<Float>(0, -tilt, 1))
             for x in 0..<width {
                 let i = (y * width + x) * 4
                 pixels[i] = UInt8((n.x * 0.5 + 0.5) * 255)

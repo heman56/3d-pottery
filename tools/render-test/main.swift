@@ -41,6 +41,7 @@ func render() async throws {
     }
     let texA = swapTex ? try await TextureResource(image: makeImage(stripes: true), withName: nil, options: .init(semantic: .color)) : nil
     let texB = swapTex ? try await TextureResource(image: makeImage(stripes: false), withName: nil, options: .init(semantic: .color)) : nil
+    var ridgeCylinder: ModelEntity?
     var balls: [(ModelEntity, PlatformColor, Finish)] = []
     for (row, color) in colors.enumerated() {
         for (column, finish) in Finish.allCases.enumerated() {
@@ -84,6 +85,8 @@ func render() async throws {
                                    materials: [PotteryMaterial.make(color: PlatformColor(red: 0.72, green: 0.45, blue: 0.30, alpha: 1), finish: .glossy, wireframe: false, texture: nil, normalMap: normalMap)])
         cylinder.position = [0, 0, 0.5]
         renderer.entities.append(cylinder)
+        // RIDGESOFF=1：渲染到一半把法線貼圖拿掉，檢查換材質後凹凸會不會殘留
+        if ProcessInfo.processInfo.environment["RIDGESOFF"] != nil { ridgeCylinder = cylinder }
     }
     // 背後放一塊米色底板，才看得出琉璃（半透明）
     let backdrop = ModelEntity(
@@ -121,6 +124,9 @@ func render() async throws {
             for (ball, color, finish) in balls {
                 ball.model?.materials = [PotteryMaterial.make(color: swapTex ? .white : color, finish: finish, wireframe: false, texture: texB)]
             }
+        }
+        if i == 20, let cylinder = ridgeCylinder {
+            cylinder.model?.materials = [PotteryMaterial.make(color: PlatformColor(red: 0.72, green: 0.45, blue: 0.30, alpha: 1), finish: .glossy, wireframe: false, texture: nil, normalMap: nil)]
         }
         try renderer.updateAndRender(deltaTime: 0.1, cameraOutput: output)
         try await Task.sleep(for: .milliseconds(60))

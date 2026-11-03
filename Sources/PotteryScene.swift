@@ -19,8 +19,9 @@ final class PotteryScene {
     private var pattern = PotteryModel.Pattern.stripes
     private var wireframe = false
     private var finish = Finish.matte
-    private var ridges = false
+    private var ridges = true
     private var ridgeNormalMap: TextureResource?
+    private var floorMaterial: any RealityKit.Material = PotteryMaterial.make(color: .darkGray, finish: .matte, wireframe: false, texture: nil)
     private var interiorMaterial: any RealityKit.Material = PotteryMaterial.make(color: .darkGray, finish: .matte, wireframe: false, texture: nil)
     private var material: any RealityKit.Material = PotteryMaterial.make(color: .brown, finish: .matte, wireframe: false, texture: nil)
     /// 環境光（IBL）的來源：只有真機與 Mac 版會用到（Intel 模擬器的光照材質會當機）
@@ -279,8 +280,11 @@ final class PotteryScene {
                                           normalMap: ridges && !wireframe ? ridgeNormalMap : nil)
         // 內側：同釉色的深色素面，不上釉（不受質感與花紋影響）
         let interiorColor = wireframe ? color : glaze.color.shaded(by: 0.5)
-        interiorMaterial = PotteryMaterial.make(color: interiorColor, finish: .matte, wireframe: wireframe, texture: nil)
-        pot.model?.materials = [material, interiorMaterial]
+        interiorMaterial = PotteryMaterial.make(color: interiorColor, finish: .matte, wireframe: wireframe, texture: nil,
+                                                normalMap: ridges && !wireframe ? ridgeNormalMap : nil)
+        // 內底：平的，拉坯紋的貼圖在這裡會變成一條條直線，所以不加法線貼圖
+        floorMaterial = PotteryMaterial.make(color: interiorColor, finish: .matte, wireframe: wireframe, texture: nil)
+        pot.model?.materials = [material, interiorMaterial, floorMaterial]
 
         cavityMaterial = UnlitMaterial(color: glaze.color.shaded(by: 0.45))
         cavity.model?.materials = [cavityMaterial]
@@ -290,7 +294,7 @@ final class PotteryScene {
     /// 重新產生陶器網格。連續拖曳時只保留最新的一份，避免排隊
     func rebuild(_ spec: VesselSpec) {
         guard let mesh = Self.makeVessel(spec) else { return }
-        pot.model = ModelComponent(mesh: mesh, materials: [material, interiorMaterial])
+        pot.model = ModelComponent(mesh: mesh, materials: [material, interiorMaterial, floorMaterial])
 
         #if targetEnvironment(simulator)
         // 模擬器沒有光影，用一片深色的同形狀薄片假裝容器開口的陰暗內側
@@ -385,7 +389,7 @@ final class PotteryScene {
         var normals: [SIMD3<Float>] = []
         var uvs: [SIMD2<Float>] = []
         var indices: [UInt32] = []
-        // 每個三角形用哪個材質：0 是外側（上釉、有花紋），1 是內側（深色素面，不上釉）
+        // 每個三角形用哪個材質：0 是外側（上釉、有花紋），1 是內壁、2 是內底（深色素面，不上釉）
         var tangents: [SIMD3<Float>] = []
         var bitangents: [SIMD3<Float>] = []
         var faceMaterials: [UInt32] = []
@@ -515,7 +519,7 @@ final class PotteryScene {
         }
 
         addDisc(scale: 1, y: 0, facing: [0, -1, 0])
-        currentMaterial = 1
+        currentMaterial = 2
         addDisc(scale: wall * 0.999, y: baseThickness, facing: [0, 1, 0])
 
         var descriptor = MeshDescriptor(name: "pot")

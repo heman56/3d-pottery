@@ -20,7 +20,7 @@ final class PotteryModel {
     private(set) var twist: Float = 0
     private(set) var pattern: Pattern = .stripes
     private(set) var finish: Finish = .matte
-    private(set) var ridges = false
+    private(set) var ridges = true
     /// 貼滿陶器外面的照片（只有「照片」花紋會用到）。照片會被縮放成「繞一圈 tilesAround 張、
     /// 從底到口 tilesUp 張」，張數都是整數，所以四方連續的圖案接得起來
     private(set) var photo: UIImage?
