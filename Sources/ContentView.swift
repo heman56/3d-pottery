@@ -27,12 +27,13 @@ struct ContentView: View {
                 scene.setGlaze(model.glaze)
                 scene.setPattern(model.pattern)
                 scene.rebuild(model.spec)
+                await scene.loadTextures()
             }
             .gesture(dragGesture)
             .simultaneousGesture(zoomGesture)
             .onChange(of: model.spec) { scene.rebuild(model.spec) }
             .onChange(of: model.pattern) { scene.setPattern(model.pattern) }
-            .onChange(of: model.photo) { scene.setPhoto(model.photo) }
+            .onChange(of: model.photo) { Task { await scene.setPhoto(model.photo) } }
             .onChange(of: pickedItem) { loadPickedPhoto() }
             .onChange(of: model.glaze) { scene.setGlaze(model.glaze) }
             .onChange(of: model.showWireframe) { scene.setWireframe(model.showWireframe) }

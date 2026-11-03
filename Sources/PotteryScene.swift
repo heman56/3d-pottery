@@ -7,6 +7,7 @@ final class PotteryScene {
     let root = Entity()
     private let turntable = Entity()
     private let pot = ModelEntity()
+    private let disc = ModelEntity()
     private let camera = PerspectiveCamera()
     /// 永遠面向相機的背景（iOS 的 RealityView 不能直接設背景色）
     private let backdrop = ModelEntity(
@@ -48,31 +49,18 @@ final class PotteryScene {
     init() {
         root.addChild(backdrop)
 
-        // 轉盤：自己組網格，頂面貼放射狀線條的貼圖，轉動時才看得出來在轉
-        let disc: ModelEntity
-        if let mesh = Self.makeTurntableMesh(radius: PotteryModel.turntableRadius, thickness: 0.03), let texture = Self.turntableTexture() {
-            disc = ModelEntity(
-                mesh: mesh,
-                materials: [Self.makeMaterial(color: .white, glazed: false, wireframe: false, texture: texture)]
-            )
+        // 轉盤：自己組網格；先用純灰色，放射狀線條的貼圖在 loadTextures() 載入後才貼上
+        let plainGray = Self.makeMaterial(color: UIColor(white: 0.72, alpha: 1), glazed: false, wireframe: false, texture: nil)
+        if let mesh = Self.makeTurntableMesh(radius: PotteryModel.turntableRadius, thickness: 0.03) {
+            disc.model = ModelComponent(mesh: mesh, materials: [plainGray])
         } else {
-            disc = ModelEntity(
-                mesh: .generateCylinder(height: 0.03, radius: PotteryModel.turntableRadius),
-                materials: [Self.makeMaterial(color: UIColor(white: 0.72, alpha: 1), glazed: false, wireframe: false, texture: nil)]
-            )
+            disc.model = ModelComponent(mesh: .generateCylinder(height: 0.03, radius: PotteryModel.turntableRadius), materials: [plainGray])
             disc.position.y = -0.015
         }
         turntable.addChild(disc)
 
         turntable.addChild(pot)
         root.addChild(turntable)
-
-        for pattern in PotteryModel.Pattern.allCases {
-            if let image = Self.patternImage(pattern),
-               let texture = try? TextureResource.generate(from: image, options: .init(semantic: .color)) {
-                textures[pattern] = texture
-            }
-        }
 
         root.addChild(camera)
         applyCamera()
@@ -226,15 +214,35 @@ final class PotteryScene {
         refreshMaterials()
     }
 
-    func setPhoto(_ image: UIImage?) {
+    /// 載入所有程式畫出的貼圖（花紋、轉盤）。TextureResource(image:withName:options:) 是 async，
+    /// 所以放在這裡，而不是 init
+    func loadTextures() async {
+        for pattern in PotteryModel.Pattern.allCases {
+            if let image = Self.patternImage(pattern),
+               let texture = try? await TextureResource(image: image, withName: nil, options: .init(semantic: .color)) {
+                textures[pattern] = texture
+            }
+        }
+        if let image = Self.turntableImage(),
+           let texture = try? await TextureResource(image: image, withName: nil, options: .init(semantic: .color)) {
+            disc.model?.materials = [Self.makeMaterial(color: .white, glazed: false, wireframe: false, texture: texture)]
+        }
+        refreshMaterials()
+    }
+
+    func setPhoto(_ image: UIImage?) async {
         photo = image
-        photoTexture = image.flatMap(Self.photoTexture)
+        if let image, let cgImage = Self.photoImage(image) {
+            photoTexture = try? await TextureResource(image: cgImage, withName: nil, options: .init(semantic: .color))
+        } else {
+            photoTexture = nil
+        }
         refreshMaterials()
     }
 
     /// 照片整張當作一塊「拼磚」。先重畫一次，把照片的方向（EXIF）轉正；縮到最長邊 1024 以內。
     /// 之後網格的 UV 會讓這塊磚重複拼貼，張數由陶器的 UV 決定，改張數不用重畫貼圖
-    private static func photoTexture(_ photo: UIImage) -> TextureResource? {
+    private static func photoImage(_ photo: UIImage) -> CGImage? {
         let scale = min(1, 1024 / max(max(photo.size.width, photo.size.height), 1))
         let size = CGSize(width: max(photo.size.width * scale, 1), height: max(photo.size.height * scale, 1))
         let format = UIGraphicsImageRendererFormat()
@@ -242,8 +250,7 @@ final class PotteryScene {
         let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in
             photo.draw(in: CGRect(origin: .zero, size: size))
         }
-        guard let cgImage = image.cgImage else { return nil }
-        return try? TextureResource.generate(from: cgImage, options: .init(semantic: .color))
+        return image.cgImage
     }
 
     func setPattern(_ pattern: PotteryModel.Pattern) {
@@ -574,7 +581,7 @@ final class PotteryScene {
 
     /// 轉盤的貼圖：灰底，交錯的扇形（每 10° 一塊）、放射狀的線（每 30° 加粗）、幾圈同心圓。
     /// 圓以外（含角落）是純灰色，轉盤側面就取這個顏色
-    private static func turntableTexture() -> TextureResource? {
+    private static func turntableImage() -> CGImage? {
         let side: CGFloat = 1024
         let center = CGPoint(x: side / 2, y: side / 2)
         let radius = side / 2
@@ -614,8 +621,7 @@ final class PotteryScene {
                                             width: radius * fraction * 2, height: radius * fraction * 2))
             }
         }
-        guard let cgImage = image.cgImage else { return nil }
-        return try? TextureResource.generate(from: cgImage, options: .init(semantic: .color))
+        return image.cgImage
     }
 
     // MARK: 花紋貼圖
