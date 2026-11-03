@@ -26,6 +26,7 @@ struct ContentView: View {
     /// 上次沒存的作品（自動暫存）；有值時問使用者要不要接續
     @State private var restoreRecord: Autosave.Record?
     @State private var lastAutosave: PotteryModel.Mark?
+    @State private var patternScroll: PotteryModel.Pattern?
     @State private var viewHeight: CGFloat = 0
     @State private var headerFrame = CGRect.zero
     @State private var controlsFrame = CGRect.zero
@@ -143,7 +144,7 @@ struct ContentView: View {
                     restoreRecord = nil
                 }
             }
-            Button("重新開始", role: .destructive) {
+            Button("重新開始", role: .cancel) {
                 Autosave.remove()
                 restoreRecord = nil
             }
@@ -289,37 +290,56 @@ struct ContentView: View {
         }
     }
 
-    /// 花紋選單：一排可以左右滑的小圖，選到的有咖啡色框
+    /// 花紋選單：一排小圖，選到的有咖啡色框。滑鼠沒有橫向滾輪，所以兩端加了箭頭，一次翻 4 個
     private var patternPicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(PotteryModel.Pattern.allCases) { pattern in
-                    let selected = model.pattern == pattern
-                    Button { model.setPattern(pattern) } label: {
-                        VStack(spacing: 2) {
-                            Group {
-                                if let thumb = PotteryScene.patternThumbnail(pattern) {
-                                    Image(uiImage: thumb).resizable().interpolation(.medium)
-                                } else {
-                                    Image(systemName: "photo").resizable().scaledToFit().padding(12).foregroundStyle(Self.brown)
-                                }
-                            }
-                            .frame(width: 48, height: 48)
-                            .background(Color.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? Self.brown : Color.gray.opacity(0.4), lineWidth: selected ? 3 : 1))
-                            Text(pattern.title)
-                                .font(.system(size: 12, weight: selected ? .bold : .regular, design: .rounded))
-                                .foregroundStyle(selected ? Self.brown : .secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(pattern.title)
-                }
-            }
-            .padding(.horizontal, 2)
-            .padding(.vertical, 3)
+        let all = Array(PotteryModel.Pattern.allCases)
+        func page(_ delta: Int) {
+            let current = all.firstIndex(of: patternScroll ?? all[0]) ?? 0
+            withAnimation { patternScroll = all[min(max(current + delta, 0), all.count - 1)] }
         }
+        return HStack(spacing: 4) {
+            Button { page(-4) } label: {
+                Image(systemName: "chevron.left").font(.system(size: 16, weight: .bold)).frame(width: 28, height: 48)
+            }
+            .accessibilityLabel("上一頁花紋")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(all) { pattern in
+                        let selected = model.pattern == pattern
+                        Button { model.setPattern(pattern) } label: {
+                            VStack(spacing: 2) {
+                                Group {
+                                    if let thumb = PotteryScene.patternThumbnail(pattern) {
+                                        Image(uiImage: thumb).resizable().interpolation(.medium)
+                                    } else {
+                                        Image(systemName: "photo").resizable().scaledToFit().padding(12).foregroundStyle(Self.brown)
+                                    }
+                                }
+                                .frame(width: 48, height: 48)
+                                .background(Color.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? Self.brown : Color.gray.opacity(0.4), lineWidth: selected ? 3 : 1))
+                                Text(pattern.title)
+                                    .font(.system(size: 12, weight: selected ? .bold : .regular, design: .rounded))
+                                    .foregroundStyle(selected ? Self.brown : .secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(pattern.title)
+                        .id(pattern)
+                    }
+                }
+                .scrollTargetLayout()
+                .padding(.horizontal, 2)
+                .padding(.vertical, 3)
+            }
+            .scrollPosition(id: $patternScroll, anchor: .leading)
+            Button { page(4) } label: {
+                Image(systemName: "chevron.right").font(.system(size: 16, weight: .bold)).frame(width: 28, height: 48)
+            }
+            .accessibilityLabel("下一頁花紋")
+        }
+        .foregroundStyle(Self.brown)
     }
 
     /// 標題底部到面板頂端之間才是看得到陶器的地方，把陶器移到那裡的正中央
@@ -482,7 +502,8 @@ struct ContentView: View {
                     .frame(width: 88, alignment: .leading)
                 Slider(
                     value: Binding(get: { model.twist }, set: { model.setTwist($0) }),
-                    in: -PotteryModel.maxTwist...PotteryModel.maxTwist
+                    in: -PotteryModel.maxTwist...PotteryModel.maxTwist,
+                    step: .pi / 12   // 15° 一格，常用的 30°、45°、90°、180° 都落在格線上
                 ) { editing in
                     if editing { model.beginStroke() } else { model.endStroke() }
                 }
@@ -571,16 +592,6 @@ struct ContentView: View {
                 }
                 // 切換時整顆重新建立，不在動畫中原地改圖示與文字（模擬器上偶爾在更新圖示排版時當掉）
                 .id(menuCollapsed)
-            }
-
-            if model.mode == .look {
-                HStack(spacing: 10) {
-                    ForEach(CameraPose.Preset.allCases) { preset in
-                        ToolButton(title: preset.title, symbol: preset.symbol) {
-                            model.setView(preset)
-                        }
-                    }
-                }
             }
 
             if !menuCollapsed {
