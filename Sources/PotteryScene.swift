@@ -30,6 +30,16 @@ final class PotteryScene {
     private var photo: UIImage?
     private var photoTexture: TextureResource?
     private var spin: EventSubscription?
+    /// 轉盤轉速（弧度／秒）：塑形時轉，檢視時停下來方便看細節；變速時慢慢加減速
+    private var spinTarget: Float = 1.2
+    private var spinSpeed: Float = 1.2
+    private var mode = PotteryModel.Mode.sculpt
+    /// 入窯燒製：fireTime 是已經燒了幾秒（nil 代表沒在燒），heat 是目前的溫度 0…1
+    private var fireTime: Float?
+    private var heat: Float = 0
+    private var onFireEnd: (() -> Void)?
+    private static let fireDuration: Float = 6
+    private static let cream = UIColor(red: 0.98, green: 0.92, blue: 0.80, alpha: 1)
     private var content: RealityViewCameraContent?
 
     /// 目前畫面上的相機姿態會慢慢追上目標姿態，轉視角時有滑順的動畫
@@ -169,7 +179,9 @@ final class PotteryScene {
     }
 
     private func tick(_ dt: Float) {
-        turntable.orientation = simd_quatf(angle: dt * 1.2, axis: [0, 1, 0]) * turntable.orientation
+        spinSpeed += (spinTarget - spinSpeed) * min(1, dt * 6)
+        turntable.orientation = simd_quatf(angle: dt * spinSpeed, axis: [0, 1, 0]) * turntable.orientation
+        tickFire(dt)
 
         let k = min(1, dt * 10)
         currentPose.yaw += (targetPose.yaw - currentPose.yaw) * k
@@ -179,6 +191,52 @@ final class PotteryScene {
         topInset += (targetTopInset - topInset) * k
         bottomInset += (targetBottomInset - bottomInset) * k
         applyCamera()
+    }
+
+    /// 檢視模式轉盤停下來；入窯時一律轉，整件陶器才看得到各面的火光
+    func setMode(_ mode: PotteryModel.Mode) {
+        self.mode = mode
+        updateSpinTarget()
+    }
+
+    private func updateSpinTarget() {
+        spinTarget = (mode == .sculpt || fireTime != nil) ? 1.2 : 0
+    }
+
+    /// 入窯燒製：約 6 秒。升溫（1.5 秒）→ 高溫火光閃動 → 慢慢降溫。背景跟著變暗，像在窯裡
+    func fire(onEnd: @escaping () -> Void) {
+        guard fireTime == nil else { return }
+        fireTime = 0
+        onFireEnd = onEnd
+        updateSpinTarget()
+    }
+
+    private func tickFire(_ dt: Float) {
+        guard let time = fireTime else { return }
+        let t = time + dt
+        if t >= Self.fireDuration {
+            fireTime = nil
+            heat = 0
+            backdrop.model?.materials = [UnlitMaterial(color: Self.cream)]
+            refreshMaterials()
+            updateSpinTarget()
+            onFireEnd?()
+            onFireEnd = nil
+            return
+        }
+        fireTime = t
+        let rise: Float = 1.5, hold: Float = 1.5
+        if t < rise {
+            let x = t / rise
+            heat = x * x * (3 - 2 * x)
+        } else if t < rise + hold {
+            heat = 0.92 + 0.08 * sin(t * 18) * sin(t * 7.3)   // 火光微微閃動
+        } else {
+            let x = (t - rise - hold) / (Self.fireDuration - rise - hold)
+            heat = pow(1 - x, 1.6)
+        }
+        backdrop.model?.materials = [UnlitMaterial(color: Self.cream.mixed(with: UIColor(red: 0.10, green: 0.04, blue: 0.03, alpha: 1), by: CGFloat(heat) * 0.85))]
+        refreshMaterials()
     }
 
     func start(in content: RealityViewCameraContent) {
@@ -277,13 +335,13 @@ final class PotteryScene {
         let color = wireframe ? glaze.color.shaded(by: 0.55) : (usePhoto ? UIColor.white : glaze.color)
         let texture = wireframe ? nil : (usePhoto ? photoTexture : textures[pattern])
         material = PotteryMaterial.make(color: color, finish: finish, wireframe: wireframe, texture: texture,
-                                          normalMap: ridges && !wireframe ? ridgeNormalMap : nil)
+                                          normalMap: ridges && !wireframe ? ridgeNormalMap : nil, heat: heat)
         // 內側：同釉色的深色素面，不上釉（不受質感與花紋影響）
         let interiorColor = wireframe ? color : glaze.color.shaded(by: 0.5)
         interiorMaterial = PotteryMaterial.make(color: interiorColor, finish: .matte, wireframe: wireframe, texture: nil,
-                                                normalMap: ridges && !wireframe ? ridgeNormalMap : nil)
+                                                normalMap: ridges && !wireframe ? ridgeNormalMap : nil, heat: heat)
         // 內底：平的，拉坯紋的貼圖在這裡會變成一條條直線，所以不加法線貼圖
-        floorMaterial = PotteryMaterial.make(color: interiorColor, finish: .matte, wireframe: wireframe, texture: nil)
+        floorMaterial = PotteryMaterial.make(color: interiorColor, finish: .matte, wireframe: wireframe, texture: nil, heat: heat)
         pot.model?.materials = [material, interiorMaterial, floorMaterial]
 
         cavityMaterial = UnlitMaterial(color: glaze.color.shaded(by: 0.45))

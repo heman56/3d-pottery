@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var lastDragPoint: CGPoint?
     @State private var zoomStart: Float?
     @State private var isSculpting = false
+    @State private var isFiring = false
     @State private var viewHeight: CGFloat = 0
     @State private var headerFrame = CGRect.zero
     @State private var controlsFrame = CGRect.zero
@@ -40,6 +41,7 @@ struct ContentView: View {
             .onChange(of: model.glaze) { scene.setGlaze(model.glaze) }
             .onChange(of: model.finish) { scene.setFinish(model.finish) }
             .onChange(of: model.ridges) { scene.setRidges(model.ridges) }
+            .onChange(of: model.mode) { scene.setMode(model.mode) }
             .onChange(of: model.showWireframe) { scene.setWireframe(model.showWireframe) }
             .onChange(of: model.camera) { scene.setCamera(model.camera) }
             // 選單收合／展開的動畫結束後，再重算一次陶器的位置，避免動畫途中量到的高度留下來
@@ -133,7 +135,7 @@ struct ContentView: View {
             .onChanged { value in
                 switch model.mode {
                 case .sculpt:
-                    guard !scene.isTooSteepToSculpt,
+                    guard !isFiring, !scene.isTooSteepToSculpt,
                           let rough = scene.profilePoint(at: value.location),
                           rough.y >= 0, rough.y <= PotteryModel.height else { return }
                     // 先用轉軸平面估出高度與目前的半徑，再把平面移到外緣切點的位置重算一次
@@ -335,6 +337,10 @@ struct ContentView: View {
                 Divider().frame(height: 40)
                 ToolButton(title: "網格", symbol: "grid", isOn: model.showWireframe) {
                     model.showWireframe.toggle()
+                }
+                ToolButton(title: "入窯", symbol: "flame.fill", isEnabled: !isFiring) {
+                    isFiring = true
+                    scene.fire { isFiring = false }
                 }
                 ToolButton(title: menuCollapsed ? "展開" : "收合", symbol: menuCollapsed ? "chevron.up" : "chevron.down") {
                     withAnimation(.easeInOut(duration: 0.25)) { menuCollapsed.toggle() }

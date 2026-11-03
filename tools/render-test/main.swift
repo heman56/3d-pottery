@@ -41,13 +41,16 @@ func render() async throws {
     }
     let texA = swapTex ? try await TextureResource(image: makeImage(stripes: true), withName: nil, options: .init(semantic: .color)) : nil
     let texB = swapTex ? try await TextureResource(image: makeImage(stripes: false), withName: nil, options: .init(semantic: .color)) : nil
+    // HEAT=1：五欄依序用 0.2、0.4、0.6、0.8、1.0 的溫度渲染（入窯燒製的火光）
+    let heatOn = ProcessInfo.processInfo.environment["HEAT"] != nil
+    func heatLevel(_ column: Int) -> Float { heatOn ? Float(column + 1) * 0.2 : 0 }
     var ridgeCylinder: ModelEntity?
     var balls: [(ModelEntity, PlatformColor, Finish)] = []
     for (row, color) in colors.enumerated() {
         for (column, finish) in Finish.allCases.enumerated() {
             let ball = ModelEntity(
                 mesh: .generateSphere(radius: 0.12),
-                materials: [PotteryMaterial.make(color: color, finish: swap ? .glow : finish, wireframe: false, texture: texA)]
+                materials: [PotteryMaterial.make(color: color, finish: swap ? .glow : finish, wireframe: false, texture: texA, heat: heatLevel(column))]
             )
             balls.append((ball, color, finish))
             ball.position = [Float(column - 2) * 0.3, Float(1 - row) * 0.3 - 0.15, 0]

@@ -30,9 +30,20 @@ enum Finish: CaseIterable, Identifiable, Hashable {
 }
 
 enum PotteryMaterial {
+    /// 窯火的顏色：heat 0…1，暗紅 → 橘 → 黃白
+    static func heatColor(_ heat: Float) -> PlatformColor {
+        let h = CGFloat(min(max(heat, 0), 1))
+        if h < 0.5 {
+            let t = h / 0.5
+            return PlatformColor(red: 0.55 + 0.45 * t, green: 0.08 + 0.37 * t, blue: 0.02 + 0.03 * t, alpha: 1)
+        }
+        let t = (h - 0.5) / 0.5
+        return PlatformColor(red: 1, green: 0.45 + 0.4 * t, blue: 0.05 + 0.4 * t, alpha: 1)
+    }
+
     /// 依釉色（color）、質感（finish）做出材質。texture 是花紋或照片，會和 color 相乘。
     /// PhysicallyBasedMaterial 是 struct，指定時會複製一份，所以下面每種質感都是在同一份基本設定上改幾個屬性
-    static func make(color: PlatformColor, finish: Finish, wireframe: Bool, texture: TextureResource?, normalMap: TextureResource? = nil) -> any Material {
+    static func make(color: PlatformColor, finish: Finish, wireframe: Bool, texture: TextureResource?, normalMap: TextureResource? = nil, heat: Float = 0) -> any Material {
         #if targetEnvironment(simulator)
         // Intel 模擬器編譯光照材質會當機，改用不受光照影響的 UnlitMaterial，並用顏色與透明度做近似
         var material: UnlitMaterial
@@ -45,7 +56,10 @@ enum PotteryMaterial {
         case .glow:
             material = UnlitMaterial(color: color.lightened(by: 0.45))
         }
-        if let texture {
+        if heat > 0 {
+            // 入窯：整件往燒紅的顏色靠（不受光照的版本直接換色，花紋與照片也一併蓋掉）
+            material = UnlitMaterial(color: color.mixed(with: Self.heatColor(heat), by: CGFloat(min(heat * 1.2, 1))))
+        } else if let texture {
             let tint = finish == .glow ? color.lightened(by: 0.45) : color
             material.color = .init(tint: tint, texture: .init(texture))
         }
@@ -98,6 +112,11 @@ enum PotteryMaterial {
             // 有貼圖（尤其照片是白色色調）時 2.0 會過曝成一片白，降低一些
             material.emissiveIntensity = texture == nil ? 2.0 : 0.45
         }
+        if heat > 0 {
+            // 入窯：自發光，顏色隨溫度由暗紅、橘紅到黃白；沿用原本的釉色、花紋、質感當底
+            material.emissiveColor = .init(color: Self.heatColor(heat))
+            material.emissiveIntensity = heat * 1.8
+        }
         if wireframe { material.triangleFillMode = .lines }
         return material
         #endif
@@ -130,6 +149,21 @@ enum PotteryMaterial {
 }
 
 extension PlatformColor {
+    /// 兩色之間混合：factor 0 是自己，1 是 other
+    func mixed(with other: PlatformColor, by factor: CGFloat) -> PlatformColor {
+        func parts(_ c: PlatformColor) -> (CGFloat, CGFloat, CGFloat) {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            #if canImport(UIKit)
+            c.getRed(&r, green: &g, blue: &b, alpha: &a)
+            #else
+            (c.usingColorSpace(.sRGB) ?? c).getRed(&r, green: &g, blue: &b, alpha: &a)
+            #endif
+            return (r, g, b)
+        }
+        let (r1, g1, b1) = parts(self), (r2, g2, b2) = parts(other)
+        return PlatformColor(red: r1 + (r2 - r1) * factor, green: g1 + (g2 - g1) * factor, blue: b1 + (b2 - b1) * factor, alpha: 1)
+    }
+
     /// 往白色混：factor 0 不變，1 全白
     func lightened(by factor: CGFloat) -> PlatformColor {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
