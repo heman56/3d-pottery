@@ -340,7 +340,11 @@ struct ContentView: View {
                 }
                 ToolButton(title: "入窯", symbol: "flame.fill", isEnabled: !isFiring) {
                     isFiring = true
-                    scene.fire { isFiring = false }
+                    scene.fire {
+                        isFiring = false
+                        // 燒好的陶器上了釉：原本是啞光（生坯）就換成亮釉；使用者已選別的質感就不動
+                        if model.finish == .matte { model.setFinish(.glossy) }
+                    }
                 }
                 ToolButton(title: menuCollapsed ? "展開" : "收合", symbol: menuCollapsed ? "chevron.up" : "chevron.down") {
                     withAnimation(.easeInOut(duration: 0.25)) { menuCollapsed.toggle() }
