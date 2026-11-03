@@ -21,6 +21,19 @@ targets:
       properties:
         CFBundleDisplayName: 製陶大師
         UILaunchScreen: {}
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.hemanlu.pottery
+            UTTypeDescription: 製陶大師作品
+            UTTypeConformsTo: [public.json]
+            UTTypeTagSpecification:
+              public.filename-extension: [pottery]
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: org.khronos.gltf-binary
+            UTTypeDescription: glTF 二進位 3D 模型
+            UTTypeConformsTo: [public.data, public.3d-content]
+            UTTypeTagSpecification:
+              public.filename-extension: [glb]
+              public.mime-type: [model/gltf-binary]
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft

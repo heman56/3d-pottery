@@ -1,6 +1,7 @@
 import SwiftUI
 import RealityKit
 import PhotosUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @State private var model = PotteryModel()
@@ -10,6 +11,11 @@ struct ContentView: View {
     @State private var zoomStart: Float?
     @State private var isSculpting = false
     @State private var isFiring = false
+    @State private var exportFile = PotteryFile()
+    @State private var exportType = UTType.pottery
+    @State private var showExporter = false
+    @State private var showImporter = false
+    @State private var fileMessage: String?
     @State private var viewHeight: CGFloat = 0
     @State private var headerFrame = CGRect.zero
     @State private var controlsFrame = CGRect.zero
@@ -91,6 +97,65 @@ struct ContentView: View {
                     }
             }
             .padding()
+            .overlay(alignment: .topTrailing) { fileMenu.padding() }
+        }
+        .fileExporter(isPresented: $showExporter, document: exportFile, contentType: exportType,
+                      defaultFilename: "我的陶器") { result in
+            if case .failure(let error) = result { fileMessage = "存檔失敗：\(error.localizedDescription)" }
+        }
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pottery]) { result in
+            openPottery(result)
+        }
+        .alert("製陶大師", isPresented: Binding(get: { fileMessage != nil }, set: { if !$0 { fileMessage = nil } })) {
+            Button("好") {}
+        } message: {
+            Text(fileMessage ?? "")
+        }
+    }
+
+    // MARK: 存檔／匯出
+
+    /// 右上角的「檔案」選單：存成 .pottery（可以再載入）、開啟、匯出 .glb（給 Blender 等軟體）
+    private var fileMenu: some View {
+        Menu {
+            Button("儲存作品（.pottery）", systemImage: "square.and.arrow.down") {
+                guard let data = try? model.makeDocument().encoded() else { return }
+                exportFile = PotteryFile(data: data)
+                exportType = .pottery
+                showExporter = true
+            }
+            Button("開啟作品…", systemImage: "folder") { showImporter = true }
+            Divider()
+            Button("匯出 3D 模型（.glb）", systemImage: "cube") {
+                let input = GLBExport.Input(spec: model.spec, glaze: model.glaze, pattern: model.pattern,
+                                            finish: model.finish, ridges: model.ridges, photo: model.photo)
+                guard let data = GLBExport.make(input) else {
+                    fileMessage = "匯出失敗。"
+                    return
+                }
+                exportFile = PotteryFile(data: data)
+                exportType = .glb
+                showExporter = true
+            }
+        } label: {
+            Image(systemName: "doc.on.doc")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(Color(red: 0.62, green: 0.38, blue: 0.22)))
+        }
+        .accessibilityLabel("檔案")
+    }
+
+    private func openPottery(_ result: Result<URL, Error>) {
+        do {
+            let url = try result.get()
+            // 從「檔案」App 選到的檔案在 App 外面，要先取得存取權
+            let granted = url.startAccessingSecurityScopedResource()
+            defer { if granted { url.stopAccessingSecurityScopedResource() } }
+            model.load(try PotteryDocument.decode(try Data(contentsOf: url)))
+        } catch {
+            fileMessage = "開啟失敗：\(error.localizedDescription)"
         }
     }
 

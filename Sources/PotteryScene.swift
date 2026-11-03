@@ -307,7 +307,7 @@ final class PotteryScene {
 
     /// 照片整張當作一塊「拼磚」。先重畫一次，把照片的方向（EXIF）轉正；縮到最長邊 1024 以內。
     /// 之後網格的 UV 會讓這塊磚重複拼貼，張數由陶器的 UV 決定，改張數不用重畫貼圖
-    private static func photoImage(_ photo: UIImage) -> CGImage? {
+    static func photoImage(_ photo: UIImage) -> CGImage? {
         let scale = min(1, 1024 / max(max(photo.size.width, photo.size.height), 1))
         let size = CGSize(width: max(photo.size.width * scale, 1), height: max(photo.size.height * scale, 1))
         let format = UIGraphicsImageRendererFormat()
@@ -477,6 +477,20 @@ final class PotteryScene {
     /// UV：一般花紋用「繞一圈 × 從底到口」；照片貼紙用實際的弧長（公尺）換算，
     /// 所以不論陶器多粗，照片的比例都不會被拉長或壓扁
     private static func makeVessel(_ spec: VesselSpec) -> MeshResource? {
+        let geometry = makeGeometry(spec)
+        var descriptor = MeshDescriptor(name: "pot")
+        descriptor.materials = .perFace(geometry.faceMaterials)
+        descriptor.positions = MeshBuffer(geometry.positions)
+        descriptor.normals = MeshBuffer(geometry.normals)
+        descriptor.tangents = MeshBuffer(geometry.tangents)
+        descriptor.bitangents = MeshBuffer(geometry.bitangents)
+        descriptor.textureCoordinates = MeshBuffer(geometry.uvs)
+        descriptor.primitives = .triangles(geometry.indices)
+        return try? MeshResource.generate(from: [descriptor])
+    }
+
+    /// 陶器的網格資料（頂點、法線、UV、三角形與每個三角形的材質）。畫面上的 MeshResource 和匯出的 .glb 共用
+    static func makeGeometry(_ spec: VesselSpec) -> VesselGeometry {
         let layers = spec.radii.count
         let height = PotteryModel.height
         let columns = makeColumns(sides: spec.sides)
@@ -619,15 +633,8 @@ final class PotteryScene {
         currentMaterial = 2
         addDisc(scale: wall * 0.999, y: baseThickness, facing: [0, 1, 0])
 
-        var descriptor = MeshDescriptor(name: "pot")
-        descriptor.materials = .perFace(faceMaterials)
-        descriptor.positions = MeshBuffer(positions)
-        descriptor.normals = MeshBuffer(normals)
-        descriptor.tangents = MeshBuffer(tangents)
-        descriptor.bitangents = MeshBuffer(bitangents)
-        descriptor.textureCoordinates = MeshBuffer(uvs)
-        descriptor.primitives = .triangles(indices)
-        return try? MeshResource.generate(from: [descriptor])
+        return VesselGeometry(positions: positions, normals: normals, tangents: tangents, bitangents: bitangents,
+                              uvs: uvs, indices: indices, faceMaterials: faceMaterials)
     }
 
     /// 模擬器專用：蓋在開口上的深色薄片（世界座標，已含頂層的扭轉角度）
@@ -763,7 +770,7 @@ final class PotteryScene {
 
     /// 程式畫出的貼圖：白底、灰色圖案，之後乘上釉色。
     /// 貼圖橫向對應繞陶器一圈（u），縱向對應從底到口（v）；2:1 的長寬約等於一圈的長度與高度比
-    private static func patternImage(_ pattern: PotteryModel.Pattern) -> CGImage? {
+    static func patternImage(_ pattern: PotteryModel.Pattern) -> CGImage? {
         let width: CGFloat = 1024, height: CGFloat = 512
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -810,4 +817,15 @@ final class PotteryScene {
         }
         return image.cgImage
     }
+}
+
+/// 陶器網格的原始資料。faceMaterials 每個三角形一筆：0 外側、1 內壁、2 內底
+struct VesselGeometry {
+    var positions: [SIMD3<Float>]
+    var normals: [SIMD3<Float>]
+    var tangents: [SIMD3<Float>]
+    var bitangents: [SIMD3<Float>]
+    var uvs: [SIMD2<Float>]
+    var indices: [UInt32]
+    var faceMaterials: [UInt32]
 }

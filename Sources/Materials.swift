@@ -13,7 +13,7 @@ typealias PlatformColor = NSColor
 /// 質感：同一個釉色可以有不同的表面。
 /// 材質屬性對照教材 6-7c 的 PhysicallyBasedMaterial 表：roughness、metallic、clearcoat、specular、
 /// blending、emissiveColor／emissiveIntensity、triangleFillMode
-enum Finish: CaseIterable, Identifiable, Hashable {
+enum Finish: String, Codable, CaseIterable, Identifiable, Hashable {
     case matte, glossy, metallic, glass, glow
 
     var id: Self { self }

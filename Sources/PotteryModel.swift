@@ -150,6 +150,30 @@ final class PotteryModel {
         tilesUp = min(max(Int((profileLength / tileHeight).rounded()), 1), Self.maxTiles)
     }
 
+    // MARK: 存檔 / 讀檔
+
+    func makeDocument() -> PotteryDocument {
+        PotteryDocument(radii: radii, baseShape: baseShape, twist: twist, glaze: glaze, pattern: pattern,
+                        finish: finish, ridges: ridges, tilesAround: tilesAround, tilesUp: tilesUp,
+                        photo: photo?.jpegData(compressionQuality: 0.85))
+    }
+
+    /// 載入作品。載入前的樣子進復原紀錄，讀錯檔可以退回；照片不進紀錄（和 setPhoto 一樣）
+    func load(_ document: PotteryDocument) {
+        record(snapshot)
+        radii = document.radii.map { min(max($0, Self.minRadius), Self.maxRadius) }
+        baseShape = document.baseShape
+        twist = min(max(document.twist, -Self.maxTwist), Self.maxTwist)
+        glaze = document.glaze
+        finish = document.finish
+        ridges = document.ridges
+        tilesAround = min(max(document.tilesAround, 1), Self.maxTiles)
+        tilesUp = min(max(document.tilesUp, 1), Self.maxTiles)
+        photo = document.photo.flatMap { UIImage(data: $0) }
+        // 沒有照片就不能停在「照片」花紋
+        pattern = (document.pattern == .photo && photo == nil) ? .stripes : document.pattern
+    }
+
     /// 多邊形轉角的圓弧倒角：從頂點往兩邊各退「邊長的這個比例」開始彎
     static let cornerRounding: Float = 0.22
 
@@ -337,7 +361,7 @@ final class PotteryModel {
     }
 
     /// 釉面上的花紋。貼圖由程式畫出，再乘上釉色
-    enum Pattern: CaseIterable, Identifiable, Hashable {
+    enum Pattern: String, Codable, CaseIterable, Identifiable, Hashable {
         case stripes, checker, dots, waves, photo
 
         var id: Self { self }
@@ -354,7 +378,7 @@ final class PotteryModel {
     }
 
     /// 底面的形狀。sides = 0 代表圓，其餘是正多邊形的邊數
-    enum BaseShape: CaseIterable, Identifiable {
+    enum BaseShape: String, Codable, CaseIterable, Identifiable {
         case circle, triangle, square, hexagon
 
         var id: Self { self }
@@ -378,7 +402,7 @@ final class PotteryModel {
         }
     }
 
-    enum Glaze: CaseIterable, Identifiable {
+    enum Glaze: String, Codable, CaseIterable, Identifiable {
         case clay, red, blue, green, yellow, white
 
         var id: Self { self }
