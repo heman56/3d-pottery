@@ -8,3 +8,9 @@ DerivedData/
 # Xcode / macOS
 xcuserdata/
 .DS_Store
+
+# by Heman
+works/
+
+# 打包好、要上傳到 Releases 的檔案
+dist/
