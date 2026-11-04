@@ -19,14 +19,13 @@ let package = Package(
                 .landscapeLeft,
                 .portraitUpsideDown(.when(deviceFamilies: [.pad]))   // iPad 要支援全部四個方向（多工）
             ],
-            additionalInfoPlistContentFilePath: "Info-additions.plist"
+            additionalInfoPlistContentFilePath: ".swiftpm/Info-additions.plist"
         )
     ],
     targets: [
         .executableTarget(
             name: "AppModule",
             path: ".",
-            exclude: ["Info-additions.plist"],
             resources: [.process("Resources")]
         )
     ]
