@@ -363,7 +363,9 @@ final class PotteryModel {
         lastBrush = (y, target)
 
         let layerHeight = Self.height / Float(Self.sliceCount - 1)
-        let steps = max(1, Int((abs(y - from.height) / (layerHeight * 0.5)).rounded(.up)))
+        let distance: Float = abs(y - from.height)
+        let stepSize: Float = layerHeight * 0.5
+        let steps: Int = max(1, Int((distance / stepSize).rounded(.up)))
         var next = radii
         for step in 1...steps {
             let f = Float(step) / Float(steps)

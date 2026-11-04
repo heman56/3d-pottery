@@ -236,13 +236,22 @@ extension PotteryMaterial {
                 h[y * width + x] = coarse.sample(u: u, v: v) + 0.6 * fine.sample(u: u, v: v)
             }
         }
-        var du = [Float](repeating: 0, count: width * height), dv = du
+        var du = [Float](repeating: 0, count: width * height)
+        var dv = [Float](repeating: 0, count: width * height)
+        // 相鄰兩格之間的實際距離（公尺）：整圈約 0.6 公尺、整高約 0.3 公尺
+        let spanU: Float = 2 * 0.6 / Float(width)
+        let spanV: Float = 2 * 0.3 / Float(height)
         for y in 0..<height {
+            let rowAbove: Int = max(y - 1, 0) * width
+            let rowBelow: Int = min(y + 1, height - 1) * width
+            let row: Int = y * width
             for x in 0..<width {
-                let left = h[y * width + (x + width - 1) % width], right = h[y * width + (x + 1) % width]
-                let up = h[max(y - 1, 0) * width + x], down = h[min(y + 1, height - 1) * width + x]
-                du[y * width + x] = (right - left) / (2 * 0.6 / Float(width))   // 每公尺的高度差
-                dv[y * width + x] = (down - up) / (2 * 0.3 / Float(height))
+                let left: Float = h[row + (x + width - 1) % width]
+                let right: Float = h[row + (x + 1) % width]
+                let up: Float = h[rowAbove + x]
+                let down: Float = h[rowBelow + x]
+                du[row + x] = (right - left) / spanU   // 每公尺的高度差
+                dv[row + x] = (down - up) / spanV
             }
         }
         normalized(&du, rms: amount)

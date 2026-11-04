@@ -3,6 +3,9 @@ import RealityKit
 import PhotosUI
 import UniformTypeIdentifiers
 
+/// 按鈕的咖啡色
+private let potteryAccent: Color = Color(red: 0.62, green: 0.38, blue: 0.22)
+
 struct ContentView: View {
     @State private var model = PotteryModel()
     @State private var scene = PotteryScene()
@@ -36,35 +39,64 @@ struct ContentView: View {
 
     private static let brown = Color(red: 0.45, green: 0.25, blue: 0.12)
 
+    // body 拆成幾段、每段各自指定回傳型別：一個 body 疊了十幾個修飾詞，編譯器要花幾十秒推論型別，
+    // 在 Swift Playgrounds（iPad）上會直接放棄（"unable to type-check this expression in reasonable time"）
     var body: some View {
-        ZStack {
-            RealityView { content in
-                content.camera = .virtual
-                content.add(scene.root)
-                scene.start(in: content)
-                scene.setGlaze(model.glaze)
-                scene.setPattern(model.pattern)
-                scene.setFinish(model.finish)
-                scene.ridgeSeed = model.ridgeSeed
-                scene.setRidges(model.ridges)
-                scene.rebuild(model.spec)
-                await scene.loadTextures()
-                await scene.prepareRidgeSeed(model.nextRidgeSeed)
-            }
-            .gesture(dragGesture)
-            .simultaneousGesture(zoomGesture)
+        let content = ZStack {
+            sceneView
+            overlayView
+        }
+        return withDialogs(withLifecycle(content))
+    }
+
+    private var sceneView: some View {
+        let view = RealityView { (content: inout RealityViewCameraContent) in
+            content.camera = .virtual
+            content.add(scene.root)
+            scene.start(in: content)
+            scene.setGlaze(model.glaze)
+            scene.setPattern(model.pattern)
+            scene.setFinish(model.finish)
+            scene.ridgeSeed = model.ridgeSeed
+            scene.setRidges(model.ridges)
+            scene.rebuild(model.spec)
+            await scene.loadTextures()
+            await scene.prepareRidgeSeed(model.nextRidgeSeed)
+        }
+        .gesture(dragGesture)
+        .simultaneousGesture(zoomGesture)
+        return withLayoutObservers(withRidgeObservers(withMaterialObservers(withShapeObservers(view))))
+            .ignoresSafeArea()
+    }
+
+    /// 形狀、模式、相機改變時，更新 3D 場景
+    private func withShapeObservers<V: View>(_ view: V) -> some View {
+        view
             .onChange(of: model.spec) { scene.rebuild(model.spec) }
+            .onChange(of: model.mode) { scene.setMode(model.mode) }
+            .onChange(of: model.showWireframe) { scene.setWireframe(model.showWireframe) }
+            .onChange(of: model.camera) { scene.setCamera(model.camera) }
+    }
+
+    /// 花紋、照片、釉色、質感、拉坯紋改變時，更新材質
+    private func withMaterialObservers<V: View>(_ view: V) -> some View {
+        view
             .onChange(of: model.pattern) { scene.setPattern(model.pattern) }
             .onChange(of: model.photo) { Task { await scene.setPhoto(model.photo) } }
             .onChange(of: pickedItem) { loadPickedPhoto() }
             .onChange(of: model.glaze) { scene.setGlaze(model.glaze) }
             .onChange(of: model.finish) { scene.setFinish(model.finish) }
+    }
+
+    private func withRidgeObservers<V: View>(_ view: V) -> some View {
+        view
             .onChange(of: model.ridges) { scene.setRidges(model.ridges) }
             .onChange(of: model.ridgeSeed) { Task { await scene.setRidgeSeed(model.ridgeSeed) } }
             .onChange(of: model.nextRidgeSeed) { Task { await scene.prepareRidgeSeed(model.nextRidgeSeed) } }
-            .onChange(of: model.mode) { scene.setMode(model.mode) }
-            .onChange(of: model.showWireframe) { scene.setWireframe(model.showWireframe) }
-            .onChange(of: model.camera) { scene.setCamera(model.camera) }
+    }
+
+    private func withLayoutObservers<V: View>(_ view: V) -> some View {
+        view
             // 選單收合／展開的動畫結束後，再重算一次陶器的位置，避免動畫途中量到的高度留下來
             .onChange(of: menuCollapsed) {
                 Task {
@@ -72,106 +104,148 @@ struct ContentView: View {
                     updateInsets()
                 }
             }
-            .onGeometryChange(for: CGSize.self) { $0.size } action: {
-                scene.setViewport($0)
-                viewHeight = $0.height
+            .onGeometryChange(for: CGSize.self, of: { (proxy: GeometryProxy) in proxy.size }, action: { (size: CGSize) in
+                scene.setViewport(size)
+                viewHeight = size.height
                 updateInsets()
-            }
-            .ignoresSafeArea()
+            })
+    }
 
-            VStack {
-                VStack(spacing: 4) {
-                    Text("製陶大師")
-                        .font(.system(size: 34, weight: .heavy, design: .rounded))
-                    Text(hint)
-                        .font(.system(.title3, design: .rounded, weight: .medium))
-                    if model.fileName != nil || model.isDirty {
-                        Text("\(model.fileName ?? "未命名")\(model.isDirty ? " •" : "")")
-                            .font(.system(.callout, design: .rounded, weight: .medium))
-                            .opacity(0.75)
-                    }
-                }
-                .foregroundStyle(Self.brown)
-                .allowsHitTesting(false)
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
-                    headerFrame = $0
+    private var headerView: some View {
+        VStack(spacing: 4) {
+            Text("製陶大師")
+                .font(.system(size: 34, weight: .heavy, design: .rounded))
+            Text(hint)
+                .font(.system(.title3, design: .rounded, weight: .medium))
+            if model.fileName != nil || model.isDirty {
+                Text(fileTitle)
+                    .font(.system(.callout, design: .rounded, weight: .medium))
+                    .opacity(0.75)
+            }
+        }
+        .foregroundStyle(Self.brown)
+        .allowsHitTesting(false)
+        .onGeometryChange(for: CGRect.self, of: { (proxy: GeometryProxy) in proxy.frame(in: .global) }, action: { (frame: CGRect) in
+            headerFrame = frame
+            updateInsets()
+        })
+    }
+
+    /// 標題下面的檔名；有改動還沒存就在後面加「•」
+    private var fileTitle: String {
+        let name: String = model.fileName ?? "未命名"
+        return model.isDirty ? name + " •" : name
+    }
+
+    /// 退回、重做很常用：放大，放在模型的左右兩側，拇指好按
+    private var undoRedoView: some View {
+        HStack {
+            FloatingButton(title: "退回", symbol: "arrow.uturn.backward", isEnabled: model.canUndo) {
+                model.undo()
+            }
+            Spacer()
+            FloatingButton(title: "重做", symbol: "arrow.uturn.forward", isEnabled: model.canRedo) {
+                model.redo()
+            }
+        }
+        .frame(maxHeight: .infinity)
+    }
+
+    private var overlayView: some View {
+        VStack {
+            headerView
+            undoRedoView
+            controls
+                .onGeometryChange(for: CGRect.self, of: { (proxy: GeometryProxy) in proxy.frame(in: .global) }, action: { (frame: CGRect) in
+                    controlsFrame = frame
                     updateInsets()
-                }
+                })
+        }
+        .padding()
+        .overlay(alignment: .topTrailing) { fileMenu.padding() }
+    }
 
-                // 退回、重做很常用：放大，放在模型的左右兩側，拇指好按
-                HStack {
-                    FloatingButton(title: "退回", symbol: "arrow.uturn.backward", isEnabled: model.canUndo) {
-                        model.undo()
-                    }
-                    Spacer()
-                    FloatingButton(title: "重做", symbol: "arrow.uturn.forward", isEnabled: model.canRedo) {
-                        model.redo()
+    /// 開 App 時問要不要接續上次的作品，並定時自動暫存
+    private func withLifecycle<V: View>(_ view: V) -> some View {
+        view
+            .task {
+                restoreRecord = Autosave.read()
+                // 隔一段時間暫存一次，App 當掉或被系統收掉也不會全部丟失
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(15))
+                    autosave()
+                }
+            }
+            .onChange(of: scenePhase) { if scenePhase != .active { autosave() } }
+    }
+
+    private var exportFilename: String {
+        if model.fileURL != nil, let name = model.fileName { return name }
+        return Self.defaultName
+    }
+
+    private var restoreBinding: Binding<Bool> {
+        Binding<Bool>(get: { restoreRecord != nil }, set: { _ in })
+    }
+
+    private var messageBinding: Binding<Bool> {
+        Binding<Bool>(get: { fileMessage != nil }, set: { if !$0 { fileMessage = nil } })
+    }
+
+    private func withDialogs<V: View>(_ view: V) -> some View {
+        withMessageDialogs(withFileDialogs(view))
+    }
+
+    private func withFileDialogs<V: View>(_ view: V) -> some View {
+        view
+            .fileExporter(isPresented: $showExporter, document: exportFile, contentType: exportType,
+                          defaultFilename: exportFilename) { (result: Result<URL, Error>) in
+                switch result {
+                case .success(let url):
+                    if exportType == .pottery { didSave(to: url) }
+                case .failure(let error):
+                    afterSave = nil
+                    if (error as? CocoaError)?.code != .userCancelled { fileMessage = "存檔失敗：\(error.localizedDescription)" }
+                }
+            }
+            .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pottery]) { (result: Result<URL, Error>) in
+                openPottery(result)
+            }
+    }
+
+    private func withMessageDialogs<V: View>(_ view: V) -> some View {
+        view
+            .confirmationDialog("目前的作品還沒存檔", isPresented: $askUnsaved, titleVisibility: .visible) {
+                Button("儲存") {
+                    afterSave = pendingAction
+                    save()
+                }
+                Button("不存檔", role: .destructive) {
+                    if let action = pendingAction { perform(action) }
+                }
+                Button("取消", role: .cancel) { pendingAction = nil }
+            } message: {
+                Text("要先存起來嗎？")
+            }
+            .alert("上次的作品還沒存檔", isPresented: restoreBinding) {
+                Button("接續") {
+                    if let record = restoreRecord {
+                        model.load(record.document, name: record.name, saved: false)
+                        restoreRecord = nil
                     }
                 }
-                .frame(maxHeight: .infinity)
-
-                controls
-                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
-                        controlsFrame = $0
-                        updateInsets()
-                    }
-            }
-            .padding()
-            .overlay(alignment: .topTrailing) { fileMenu.padding() }
-        }
-        .fileExporter(isPresented: $showExporter, document: exportFile, contentType: exportType,
-                      defaultFilename: model.fileURL != nil ? (model.fileName ?? Self.defaultName) : Self.defaultName) { result in
-            switch result {
-            case .success(let url):
-                if exportType == .pottery { didSave(to: url) }
-            case .failure(let error):
-                afterSave = nil
-                if (error as? CocoaError)?.code != .userCancelled { fileMessage = "存檔失敗：\(error.localizedDescription)" }
-            }
-        }
-        .confirmationDialog("目前的作品還沒存檔", isPresented: $askUnsaved, titleVisibility: .visible) {
-            Button("儲存") {
-                afterSave = pendingAction
-                save()
-            }
-            Button("不存檔", role: .destructive) {
-                if let action = pendingAction { perform(action) }
-            }
-            Button("取消", role: .cancel) { pendingAction = nil }
-        } message: {
-            Text("要先存起來嗎？")
-        }
-        .alert("上次的作品還沒存檔", isPresented: Binding(get: { restoreRecord != nil }, set: { _ in })) {
-            Button("接續") {
-                if let record = restoreRecord {
-                    model.load(record.document, name: record.name, saved: false)
+                Button("重新開始", role: .cancel) {
+                    Autosave.remove()
                     restoreRecord = nil
                 }
+            } message: {
+                Text("要接著做上次的陶器嗎？")
             }
-            Button("重新開始", role: .cancel) {
-                Autosave.remove()
-                restoreRecord = nil
+            .alert("製陶大師", isPresented: messageBinding) {
+                Button("好") {}
+            } message: {
+                Text(fileMessage ?? "")
             }
-        } message: {
-            Text("要接著做上次的陶器嗎？")
-        }
-        .task {
-            restoreRecord = Autosave.read()
-            // 隔一段時間暫存一次，App 當掉或被系統收掉也不會全部丟失
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(15))
-                autosave()
-            }
-        }
-        .onChange(of: scenePhase) { if scenePhase != .active { autosave() } }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pottery]) { result in
-            openPottery(result)
-        }
-        .alert("製陶大師", isPresented: Binding(get: { fileMessage != nil }, set: { if !$0 { fileMessage = nil } })) {
-            Button("好") {}
-        } message: {
-            Text(fileMessage ?? "")
-        }
     }
 
     // MARK: 存檔／匯出
@@ -205,7 +279,7 @@ struct ContentView: View {
                 .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
-                .background(Circle().fill(Color(red: 0.62, green: 0.38, blue: 0.22)))
+                .background(Circle().fill(potteryAccent))
         }
         .accessibilityLabel("檔案")
     }
@@ -309,27 +383,9 @@ struct ContentView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(all) { pattern in
-                        let selected = model.pattern == pattern
-                        Button { model.setPattern(pattern) } label: {
-                            VStack(spacing: 2) {
-                                Group {
-                                    if let thumb = PotteryScene.patternThumbnail(pattern) {
-                                        Image(uiImage: thumb).resizable().interpolation(.medium)
-                                    } else {
-                                        Image(systemName: "photo").resizable().scaledToFit().padding(12).foregroundStyle(Self.brown)
-                                    }
-                                }
-                                .frame(width: 48, height: 48)
-                                .background(Color.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? Self.brown : Color.gray.opacity(0.4), lineWidth: selected ? 3 : 1))
-                                Text(pattern.title)
-                                    .font(.system(size: 12, weight: selected ? .bold : .regular, design: .rounded))
-                                    .foregroundStyle(selected ? Self.brown : .secondary)
-                            }
+                        PatternCell(pattern: pattern, isSelected: model.pattern == pattern) {
+                            model.setPattern(pattern)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(pattern.title)
                         .id(pattern)
                     }
                 }
@@ -439,7 +495,7 @@ struct ContentView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16)
                     .frame(minHeight: 40)
-                    .background(Capsule().fill(Color(red: 0.62, green: 0.38, blue: 0.22)))
+                    .background(Capsule().fill(potteryAccent))
             }
             if model.photo != nil {
                 tileSlider("左右", value: model.tilesAround) { model.setTilesAround($0) }
@@ -453,7 +509,7 @@ struct ContentView: View {
                             .foregroundStyle(.white)
                             .padding(.horizontal, 12)
                             .frame(minHeight: 36)
-                            .background(Capsule().fill(Color(red: 0.62, green: 0.38, blue: 0.22)))
+                            .background(Capsule().fill(potteryAccent))
                     }
                     .buttonStyle(.plain)
                 }
@@ -478,93 +534,121 @@ struct ContentView: View {
         }
     }
 
-    /// 形狀、底面、扭轉、花紋、釉色：可以整個收起來
+    /// 形狀、底面、扭轉、花紋、釉色：可以整個收起來。
+    /// 每一列各自一個屬性，編譯器一次只要推論一小段
     private var menuBody: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                ForEach(PotteryModel.Preset.allCases) { preset in
-                    ToolButton(title: preset.title, symbol: preset.symbol) {
-                        model.apply(preset)
-                    }
+            presetRow
+            baseShapePicker
+            twistRow
+            patternPicker
+            if model.pattern == .photo {
+                photoControls
+            }
+            finishRow
+            glazeRow
+        }
+    }
+
+    private var presetRow: some View {
+        HStack(spacing: 10) {
+            ForEach(PotteryModel.Preset.allCases) { preset in
+                ToolButton(title: preset.title, symbol: preset.symbol) {
+                    model.apply(preset)
                 }
             }
+        }
+    }
 
-            Picker("底面", selection: Binding(
-                get: { model.baseShape },
-                set: { model.setBaseShape($0) }
-            )) {
-                ForEach(PotteryModel.BaseShape.allCases) { shape in
-                    Text(shape.title).tag(shape)
+    private var baseShapeBinding: Binding<PotteryModel.BaseShape> {
+        Binding<PotteryModel.BaseShape>(get: { model.baseShape }, set: { model.setBaseShape($0) })
+    }
+
+    private var baseShapePicker: some View {
+        Picker("底面", selection: baseShapeBinding) {
+            ForEach(PotteryModel.BaseShape.allCases) { shape in
+                Text(shape.title).tag(shape)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    private var twistBinding: Binding<Float> {
+        Binding<Float>(get: { model.twist }, set: { model.setTwist($0) })
+    }
+
+    private var twistDegrees: Int {
+        Int((model.twist * 180 / Float.pi).rounded())
+    }
+
+    private var twistRow: some View {
+        HStack(spacing: 10) {
+            Text("扭轉 \(twistDegrees)°")
+                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                .foregroundStyle(Self.brown)
+                .frame(width: 88, alignment: .leading)
+            twistSlider
+            twistResetButton
+        }
+    }
+
+    private var twistSlider: some View {
+        let limit: Float = PotteryModel.maxTwist
+        let range: ClosedRange<Float> = -limit...limit
+        // 15° 一格，常用的 30°、45°、90°、180° 都落在格線上
+        let step: Float = Float.pi / 12
+        return Slider(value: twistBinding, in: range, step: step) { (editing: Bool) in
+            if editing { model.beginStroke() } else { model.endStroke() }
+        }
+        .tint(Self.brown)
+    }
+
+    private var twistResetButton: some View {
+        let isZero: Bool = model.twist == 0
+        return Button {
+            model.resetTwist()
+        } label: {
+            Label("歸零", systemImage: "arrow.counterclockwise")
+                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 40)
+                .background(Capsule().fill(potteryAccent))
+                .opacity(isZero ? 0.35 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(isZero)
+    }
+
+    private var finishBinding: Binding<Finish> {
+        Binding<Finish>(get: { model.finish }, set: { model.setFinish($0) })
+    }
+
+    private var ridgesBinding: Binding<Bool> {
+        Binding<Bool>(get: { model.ridges }, set: { model.setRidges($0) })
+    }
+
+    private var finishRow: some View {
+        HStack(spacing: 8) {
+            Picker("質感", selection: finishBinding) {
+                ForEach(Finish.allCases) { finish in
+                    Text(finish.title).tag(finish)
                 }
             }
             .pickerStyle(.segmented)
 
-            HStack(spacing: 10) {
-                Text("扭轉 \(Int((model.twist * 180 / .pi).rounded()))°")
-                    .font(.system(.subheadline, design: .rounded, weight: .bold))
-                    .foregroundStyle(Self.brown)
-                    .frame(width: 88, alignment: .leading)
-                Slider(
-                    value: Binding(get: { model.twist }, set: { model.setTwist($0) }),
-                    in: -PotteryModel.maxTwist...PotteryModel.maxTwist,
-                    step: .pi / 12   // 15° 一格，常用的 30°、45°、90°、180° 都落在格線上
-                ) { editing in
-                    if editing { model.beginStroke() } else { model.endStroke() }
-                }
-                .tint(Self.brown)
-                Button {
-                    model.resetTwist()
-                } label: {
-                    Label("歸零", systemImage: "arrow.counterclockwise")
-                        .font(.system(.subheadline, design: .rounded, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 40)
-                        .background(Capsule().fill(Color(red: 0.62, green: 0.38, blue: 0.22)))
-                        .opacity(model.twist == 0 ? 0.35 : 1)
-                }
-                .buttonStyle(.plain)
-                .disabled(model.twist == 0)
-            }
-
-            patternPicker
-
-            if model.pattern == .photo {
-                photoControls
-            }
-
-            HStack(spacing: 8) {
-                Picker("質感", selection: Binding(
-                    get: { model.finish },
-                    set: { model.setFinish($0) }
-                )) {
-                    ForEach(Finish.allCases) { finish in
-                        Text(finish.title).tag(finish)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Toggle("拉坯紋", isOn: Binding(
-                    get: { model.ridges },
-                    set: { model.setRidges($0) }
-                ))
+            Toggle("拉坯紋", isOn: ridgesBinding)
                 .toggleStyle(.button)
-                .tint(Color(red: 0.62, green: 0.38, blue: 0.22))
+                .tint(potteryAccent)
                 .fixedSize()
-            }
+        }
+    }
 
-            HStack(spacing: 12) {
-                ForEach(PotteryModel.Glaze.allCases) { glaze in
-                    Button {
-                        model.setGlaze(glaze)
-                    } label: {
-                        Circle()
-                            .fill(Color(glaze.color))
-                            .frame(width: 44, height: 44)
-                            .overlay(Circle().stroke(.white, lineWidth: model.glaze == glaze ? 5 : 0))
-                            .shadow(radius: 3)
-                    }
-                    .accessibilityLabel("釉色")
+    private var glazeRow: some View {
+        HStack(spacing: 12) {
+            ForEach(PotteryModel.Glaze.allCases) { glaze in
+                GlazeButton(glaze: glaze, isSelected: model.glaze == glaze) {
+                    model.setGlaze(glaze)
                 }
             }
         }
@@ -626,7 +710,7 @@ private struct FloatingButton: View {
             }
             .foregroundStyle(.white)
             .frame(width: 76, height: 76)
-            .background(Circle().fill(Color(red: 0.62, green: 0.38, blue: 0.22)))
+            .background(Circle().fill(potteryAccent))
             .shadow(radius: 3)
             .opacity(isEnabled ? 1 : 0.35)
         }
@@ -656,11 +740,68 @@ private struct ToolButton: View {
             .padding(.horizontal, 4)
             .background(
                 RoundedRectangle(cornerRadius: 14)
-                    .fill(isOn ? Color.orange : Color(red: 0.62, green: 0.38, blue: 0.22))
+                    .fill(isOn ? Color.orange : potteryAccent)
             )
             .opacity(isEnabled ? 1 : 0.35)
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
+    }
+}
+
+/// 釉色圓鈕
+private struct GlazeButton: View {
+    let glaze: PotteryModel.Glaze
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Circle()
+                .fill(Color(glaze.color))
+                .frame(width: 44, height: 44)
+                .overlay(Circle().stroke(Color.white, lineWidth: isSelected ? 5 : 0))
+                .shadow(radius: 3)
+        }
+        .accessibilityLabel("釉色")
+    }
+}
+
+/// 花紋列的一格：縮圖加名字，選到的有咖啡色框
+private struct PatternCell: View {
+    let pattern: PotteryModel.Pattern
+    let isSelected: Bool
+    let action: () -> Void
+
+    private static let brown = Color(red: 0.45, green: 0.25, blue: 0.12)
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                thumbnail
+                    .frame(width: 48, height: 48)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(border)
+                Text(pattern.title)
+                    .font(.system(size: 12, weight: isSelected ? .bold : .regular, design: .rounded))
+                    .foregroundStyle(isSelected ? Self.brown : Color.secondary)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(pattern.title)
+    }
+
+    @ViewBuilder private var thumbnail: some View {
+        if let thumb = PotteryScene.patternThumbnail(pattern) {
+            Image(uiImage: thumb).resizable().interpolation(.medium)
+        } else {
+            Image(systemName: "photo").resizable().scaledToFit().padding(12).foregroundStyle(Self.brown)
+        }
+    }
+
+    private var border: some View {
+        RoundedRectangle(cornerRadius: 8)
+            .stroke(isSelected ? Self.brown : Color.gray.opacity(0.4), lineWidth: isSelected ? 3 : 1)
     }
 }
