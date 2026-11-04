@@ -129,7 +129,7 @@ enum PotteryMaterial {
     /// 隨機的 seed：粗、細兩組紋路，各自有隨機的圈數、強弱、螺旋圈數（繞一圈上升幾圈，取整數才接得起來，最多十幾圈，傾斜就看得出來），
     /// 再加上紋路間距的緩慢起伏與整體強弱的漲落，所以看起來像手拉的，每件都不一樣
     static func ridgeNormalImage(seed: UInt32 = 0) -> CGImage? {
-        let width = seed == 0 ? 8 : 256, height = 1024
+        let width = seed == 0 ? 8 : 512, height = 1024
         let twoPi = 2 * Float.pi
         var rng = SeededRandom(seed: seed)
         func range(_ r: ClosedRange<Float>) -> Float { r.lowerBound + (r.upperBound - r.lowerBound) * rng.next() }
@@ -140,6 +140,18 @@ enum PotteryMaterial {
         let wobbleAmp = range(0.2...6.0), wobbleCycles = Float(1 + Int(range(0...3.99))), wobblePhase = range(0...twoPi)
         let swellCycles = Float(1 + Int(range(0...2.99))), swellPhase = range(0...twoPi)
         let jitterCycles = range(7...19), jitterPhase = range(0...twoPi), finePhase = range(0...twoPi)
+        // 表面性格：拉坯紋之外，再疊上細砂（顆粒）或刷痕（細的直紋），或把拉坯紋減弱。
+        // 依序是（拉坯紋強度、細砂強度、刷痕強度）；放在上面那些抽籤之後，不影響它們
+        let personalities: [(ridge: Float, sand: Float, brush: Float)] = [
+            (1, 0, 0), (1, 0.22, 0), (1, 0, 0.25), (0.35, 0.3, 0), (0.55, 0.15, 0.2),
+        ]
+        let personality = seed == 0 ? personalities[0] : personalities[Int(range(0...4.99))]
+        let sandSeed = range(0...1), brushCells = Int(range(90...220)), brushPhase = range(0...twoPi)
+        let brushBands = Float(2 + Int(range(0...2.99))), brushDrift = range(0.005...0.03)
+        let sand = personality.sand > 0 ? Self.sandSlopes(width: width, height: height, seed: sandSeed, amount: personality.sand) : nil
+        let brush = personality.brush > 0
+            ? Self.brushSlopes(width: width, height: height, cells: brushCells, phase: brushPhase, bands: brushBands, drift: brushDrift, amount: personality.brush)
+            : nil
         var pixels = [UInt8](repeating: 255, count: width * height * 4)
         for y in 0..<height {
             let v = Float(y) / Float(height)
@@ -157,7 +169,13 @@ enum PotteryMaterial {
                     let second = fineAmp * cos(twoPi * (fine * v + fineTurns * u) + 1.7 * warp + finePhase)
                     tilt = min(max(swell * (first + second), -0.6), 0.6)
                 }
-                let n = simd_normalize(SIMD3<Float>(0, -tilt, 1))
+                var slopeU: Float = 0, slopeV = tilt * personality.ridge
+                if let sand {
+                    slopeU += sand.u[y * width + x]
+                    slopeV += sand.v[y * width + x]
+                }
+                if let brush { slopeU += brush[y * width + x] }
+                let n = simd_normalize(SIMD3<Float>(-slopeU, -slopeV, 1))
                 let i = (y * width + x) * 4
                 pixels[i] = UInt8((n.x * 0.5 + 0.5) * 255)
                 pixels[i + 1] = UInt8((n.y * 0.5 + 0.5) * 255)
@@ -169,6 +187,88 @@ enum PotteryMaterial {
                        space: CGColorSpaceCreateDeviceRGB(),
                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
                        provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+    }
+}
+
+extension PotteryMaterial {
+    /// 隨機格點上的平滑雜訊（u 方向首尾相接，v 方向不接）。cellsU × (cellsV + 1) 個隨機值，之間用 smoothstep 內插
+    private struct ValueNoise {
+        let cellsU: Int, cellsV: Int
+        private let values: [Float]
+
+        init(cellsU: Int, cellsV: Int, rng: inout SeededRandom) {
+            self.cellsU = cellsU
+            self.cellsV = cellsV
+            values = (0..<(cellsU * (cellsV + 1))).map { _ in rng.next() * 2 - 1 }
+        }
+
+        func sample(u: Float, v: Float) -> Float {
+            let x = u * Float(cellsU), y = min(max(v, 0), 0.9999) * Float(cellsV)
+            let xi = Int(x.rounded(.down)), yi = Int(y)
+            func smooth(_ f: Float) -> Float { f * f * (3 - 2 * f) }
+            let fx = smooth(x - Float(xi)), fy = smooth(y - Float(yi))
+            let x0 = ((xi % cellsU) + cellsU) % cellsU, x1 = (x0 + 1) % cellsU
+            func value(_ cx: Int, _ cy: Int) -> Float { values[cy * cellsU + cx] }
+            let top = value(x0, yi) * (1 - fx) + value(x1, yi) * fx
+            let bottom = value(x0, yi + 1) * (1 - fx) + value(x1, yi + 1) * fx
+            return top * (1 - fy) + bottom * fy
+        }
+    }
+
+    /// 把一組數字縮放到指定的均方根大小
+    private static func normalized(_ values: inout [Float], rms target: Float) {
+        let mean = values.reduce(0) { $0 + $1 * $1 } / Float(max(values.count, 1))
+        let scale = mean > 0 ? target / mean.squareRoot() : 0
+        for i in values.indices { values[i] *= scale }
+    }
+
+    /// 細砂：兩層顆粒雜訊（一粗一細）當高度，取兩個方向的斜率。
+    /// 貼圖橫向約 0.6 公尺、縱向約 0.3 公尺，格數照比例 2:1 取，顆粒在陶器上才是圓的
+    fileprivate static func sandSlopes(width: Int, height: Int, seed: Float, amount: Float) -> (u: [Float], v: [Float]) {
+        var rng = SeededRandom(seed: UInt32(seed * 1_000_000) &+ 77)
+        let coarse = ValueNoise(cellsU: 256, cellsV: 128, rng: &rng)
+        let fine = ValueNoise(cellsU: 384, cellsV: 192, rng: &rng)
+        var h = [Float](repeating: 0, count: width * height)
+        for y in 0..<height {
+            let v = Float(y) / Float(height)
+            for x in 0..<width {
+                let u = Float(x) / Float(width)
+                h[y * width + x] = coarse.sample(u: u, v: v) + 0.6 * fine.sample(u: u, v: v)
+            }
+        }
+        var du = [Float](repeating: 0, count: width * height), dv = du
+        for y in 0..<height {
+            for x in 0..<width {
+                let left = h[y * width + (x + width - 1) % width], right = h[y * width + (x + 1) % width]
+                let up = h[max(y - 1, 0) * width + x], down = h[min(y + 1, height - 1) * width + x]
+                du[y * width + x] = (right - left) / (2 * 0.6 / Float(width))   // 每公尺的高度差
+                dv[y * width + x] = (down - up) / (2 * 0.3 / Float(height))
+            }
+        }
+        normalized(&du, rms: amount)
+        normalized(&dv, rms: amount)
+        return (du, dv)
+    }
+
+    /// 刷痕：只沿圓周方向變化的一維雜訊（一條條直紋），略微飄移，並隨高度一段強一段弱
+    fileprivate static func brushSlopes(width: Int, height: Int, cells: Int, phase: Float, bands: Float, drift: Float, amount: Float) -> [Float] {
+        var rng = SeededRandom(seed: UInt32(cells) &* 7919 &+ 13)
+        let main = ValueNoise(cellsU: cells, cellsV: 1, rng: &rng)
+        let fine = ValueNoise(cellsU: Int(Float(cells) * 2.3), cellsV: 1, rng: &rng)
+        let delta = 0.5 / Float(width)
+        var slopes = [Float](repeating: 0, count: width * height)
+        for y in 0..<height {
+            let v = Float(y) / Float(height)
+            let shift = drift * sin(2 * .pi * (2 * v) + phase)
+            let band = 0.4 + 0.6 * (0.5 + 0.5 * sin(2 * .pi * bands * v + phase))
+            for x in 0..<width {
+                let u = Float(x) / Float(width) + shift
+                func h(_ u: Float) -> Float { main.sample(u: u, v: 0) + 0.5 * fine.sample(u: u, v: 0) }
+                slopes[y * width + x] = (h(u + delta) - h(u - delta)) * band
+            }
+        }
+        normalized(&slopes, rms: amount)
+        return slopes
     }
 }
 
