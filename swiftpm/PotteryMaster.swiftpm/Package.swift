@@ -13,7 +13,12 @@ let package = Package(
             displayVersion: "1.0",
             bundleVersion: "1",
             supportedDeviceFamilies: [.pad, .phone],
-            supportedInterfaceOrientations: [.portrait, .landscapeLeft, .landscapeRight],
+            supportedInterfaceOrientations: [
+                .portrait,
+                .landscapeRight,
+                .landscapeLeft,
+                .portraitUpsideDown(.when(deviceFamilies: [.pad]))   // iPad 要支援全部四個方向（多工）
+            ],
             additionalInfoPlistContentFilePath: "Info-additions.plist"
         )
     ],
