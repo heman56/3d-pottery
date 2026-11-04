@@ -25,7 +25,8 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "AppModule",
-            path: "Sources",
+            path: ".",
+            exclude: ["Info-additions.plist"],
             resources: [.process("Resources")]
         )
     ]
