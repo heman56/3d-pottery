@@ -21,6 +21,10 @@ final class PotteryModel {
     private(set) var pattern: Pattern = .stripes
     private(set) var finish: Finish = .matte
     private(set) var ridges = true
+    /// 拉坯紋的亂數種子：每件新陶器、每次重新打開拉坯紋都換一個，紋路就不一樣；存進 .pottery
+    private(set) var ridgeSeed = PotteryModel.randomSeed()
+
+    static func randomSeed() -> UInt32 { UInt32.random(in: 1...UInt32.max) }
     /// 貼滿陶器外面的照片（只有「照片」花紋會用到）。照片會被縮放成「繞一圈 tilesAround 張、
     /// 從底到口 tilesUp 張」，張數都是整數，所以四方連續的圖案接得起來
     private(set) var photo: UIImage?
@@ -55,6 +59,7 @@ final class PotteryModel {
         var pattern: Pattern
         var finish: Finish
         var ridges: Bool
+        var ridgeSeed: UInt32
         var tilesAround: Int
         var tilesUp: Int
         var photo: ObjectIdentifier?
@@ -62,7 +67,7 @@ final class PotteryModel {
 
     var mark: Mark {
         Mark(radii: radii, glaze: glaze, baseShape: baseShape, twist: twist, pattern: pattern, finish: finish,
-             ridges: ridges, tilesAround: tilesAround, tilesUp: tilesUp, photo: photo.map(ObjectIdentifier.init))
+             ridges: ridges, ridgeSeed: ridgeSeed, tilesAround: tilesAround, tilesUp: tilesUp, photo: photo.map(ObjectIdentifier.init))
     }
 
     /// 有改動還沒存。退回到存檔時的樣子就又算沒改動
@@ -87,6 +92,7 @@ final class PotteryModel {
         pattern = .stripes
         finish = .matte
         ridges = true
+        ridgeSeed = Self.randomSeed()
         photo = nil
         tilesAround = 4
         tilesUp = 2
@@ -211,7 +217,7 @@ final class PotteryModel {
 
     func makeDocument() -> PotteryDocument {
         PotteryDocument(radii: radii, baseShape: baseShape, twist: twist, glaze: glaze, pattern: pattern,
-                        finish: finish, ridges: ridges, tilesAround: tilesAround, tilesUp: tilesUp,
+                        finish: finish, ridges: ridges, ridgeSeed: ridgeSeed, tilesAround: tilesAround, tilesUp: tilesUp,
                         photo: photo?.jpegData(compressionQuality: 0.85))
     }
 
@@ -225,6 +231,7 @@ final class PotteryModel {
         glaze = document.glaze
         finish = document.finish
         ridges = document.ridges
+        ridgeSeed = document.ridgeSeed ?? 0
         tilesAround = min(max(document.tilesAround, 1), Self.maxTiles)
         tilesUp = min(max(document.tilesUp, 1), Self.maxTiles)
         photo = document.photo.flatMap { UIImage(data: $0) }
@@ -259,6 +266,7 @@ final class PotteryModel {
         guard on != ridges else { return }
         record(snapshot)
         ridges = on
+        if on { ridgeSeed = Self.randomSeed() }
     }
 
     func setPattern(_ newPattern: Pattern) {

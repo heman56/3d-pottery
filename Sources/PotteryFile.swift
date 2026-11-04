@@ -21,6 +21,8 @@ struct PotteryDocument: Codable {
     var pattern: PotteryModel.Pattern
     var finish: Finish
     var ridges: Bool
+    /// 拉坯紋的亂數種子；舊檔沒有這個欄位，載入時用最早版本固定的紋路（0）
+    var ridgeSeed: UInt32?
     var tilesAround: Int
     var tilesUp: Int
     /// 照片貼紙用的照片（JPEG；JSON 裡自動變成 base64）

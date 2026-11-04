@@ -122,18 +122,42 @@ enum PotteryMaterial {
         #endif
     }
 
-    /// 拉坯紋的法線貼圖：一圈圈水平的細紋（沿 v 方向起伏、沿 u 方向不變），
-    /// 兩個不同頻率疊在一起，看起來不會太整齊。頻率取整數，v 從 0 到 1 剛好接得起來。
-    /// 法線 = 高度的斜率換成顏色（0.5 代表不偏）；斜率直接寫成傾斜量（約 0.3 ≈ 17°），不隨頻率變大
-    static func ridgeNormalImage() -> CGImage? {
-        let width = 8, height = 1024
+    /// 拉坯紋的法線貼圖。seed 決定這件陶器的紋路，同一個 seed 一定畫出同一張；seed 0 是最早版本固定的紋路（舊作品檔用）。
+    ///
+    /// 貼圖縱向（v）對應從底到口，橫向（u）對應繞一圈。法線 = 高度的斜率換成顏色（0.5 代表不偏）；
+    /// 斜率直接寫成傾斜量（約 0.3 ≈ 17°），不隨頻率變大。
+    /// 隨機的 seed：粗、細兩組紋路，各自有隨機的圈數、強弱、螺旋圈數（繞一圈上升幾圈，取整數才接得起來），
+    /// 再加上紋路間距的緩慢起伏與整體強弱的漲落，所以看起來像手拉的，每件都不一樣
+    static func ridgeNormalImage(seed: UInt32 = 0) -> CGImage? {
+        let width = seed == 0 ? 8 : 128, height = 1024
+        let twoPi = 2 * Float.pi
+        var rng = SeededRandom(seed: seed)
+        func range(_ r: ClosedRange<Float>) -> Float { r.lowerBound + (r.upperBound - r.lowerBound) * rng.next() }
+        let coarse = range(26...50), fine = range(70...130)
+        let coarseAmp = range(0.20...0.40), fineAmp = range(0.10...0.22)
+        let coarseTurns = Float(Int(range(-2.99...2.99))), fineTurns = Float(Int(range(-3.99...3.99)))
+        let warpAmp = range(0.2...1.4), warpCycles = Float(2 + Int(range(0...3.99))), warpPhase = range(0...twoPi)
+        let wobbleAmp = range(0.1...0.7), wobbleCycles = Float(1 + Int(range(0...2.99))), wobblePhase = range(0...twoPi)
+        let swellCycles = Float(1 + Int(range(0...2.99))), swellPhase = range(0...twoPi)
+        let jitterCycles = range(7...19), jitterPhase = range(0...twoPi), finePhase = range(0...twoPi)
         var pixels = [UInt8](repeating: 255, count: width * height * 4)
         for y in 0..<height {
             let v = Float(y) / Float(height)
-            let twoPi = 2 * Float.pi
-            let tilt = 0.3 * cos(twoPi * 40 * v) + 0.18 * cos(twoPi * 103 * v + 1)
-            let n = simd_normalize(SIMD3<Float>(0, -tilt, 1))
             for x in 0..<width {
+                let u = Float(x) / Float(width)
+                let tilt: Float
+                if seed == 0 {
+                    tilt = 0.3 * cos(twoPi * 40 * v) + 0.18 * cos(twoPi * 103 * v + 1)
+                } else {
+                    let warp = warpAmp * sin(twoPi * warpCycles * v + warpPhase)
+                    let wobble = wobbleAmp * sin(twoPi * wobbleCycles * u + wobblePhase)
+                    let swell = 0.7 + 0.3 * sin(twoPi * swellCycles * v + swellPhase)
+                    let jitter = 0.75 + 0.25 * sin(twoPi * jitterCycles * v + jitterPhase)
+                    let first = coarseAmp * jitter * cos(twoPi * (coarse * v + coarseTurns * u) + warp + wobble)
+                    let second = fineAmp * cos(twoPi * (fine * v + fineTurns * u) + 1.7 * warp + finePhase)
+                    tilt = min(max(swell * (first + second), -0.6), 0.6)
+                }
+                let n = simd_normalize(SIMD3<Float>(0, -tilt, 1))
                 let i = (y * width + x) * 4
                 pixels[i] = UInt8((n.x * 0.5 + 0.5) * 255)
                 pixels[i + 1] = UInt8((n.y * 0.5 + 0.5) * 255)
@@ -145,6 +169,22 @@ enum PotteryMaterial {
                        space: CGColorSpaceCreateDeviceRGB(),
                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
                        provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+    }
+}
+
+/// 固定 seed 就固定結果的亂數（SplitMix64），next() 回傳 0..<1
+struct SeededRandom {
+    private var state: UInt64
+
+    init(seed: UInt32) { state = UInt64(seed) &* 0x9E37_79B9_7F4A_7C15 }
+
+    mutating func next() -> Float {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        z ^= z >> 31
+        return Float(z >> 40) / Float(1 << 24)
     }
 }
 

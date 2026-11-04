@@ -58,7 +58,7 @@ func render() async throws {
         }
     }
     // RIDGES=1：另外放一根帶 tangents 的圓柱，貼拉坯紋法線貼圖，檢查凹凸有沒有出來
-    if ProcessInfo.processInfo.environment["RIDGES"] != nil, let image = PotteryMaterial.ridgeNormalImage() {
+    if ProcessInfo.processInfo.environment["RIDGES"] != nil, let image = PotteryMaterial.ridgeNormalImage(seed: UInt32(ProcessInfo.processInfo.environment["SEED"] ?? "") ?? 0) {
         let normalMap = try await TextureResource(image: image, withName: nil, options: .init(semantic: .normal))
         var positions: [SIMD3<Float>] = [], normals: [SIMD3<Float>] = [], tangents: [SIMD3<Float>] = []
         var bitangents: [SIMD3<Float>] = [], uvs: [SIMD2<Float>] = [], indices: [UInt32] = []

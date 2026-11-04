@@ -21,6 +21,8 @@ final class PotteryScene {
     private var finish = Finish.matte
     private var ridges = true
     private var ridgeNormalMap: TextureResource?
+    /// 拉坯紋貼圖用的種子；載入貼圖前由畫面設定
+    var ridgeSeed: UInt32 = 0
     private var floorMaterial: any RealityKit.Material = PotteryMaterial.make(color: .darkGray, finish: .matte, wireframe: false, texture: nil)
     private var interiorMaterial: any RealityKit.Material = PotteryMaterial.make(color: .darkGray, finish: .matte, wireframe: false, texture: nil)
     private var material: any RealityKit.Material = PotteryMaterial.make(color: .brown, finish: .matte, wireframe: false, texture: nil)
@@ -266,9 +268,7 @@ final class PotteryScene {
            let texture = try? await TextureResource(image: image, withName: nil, options: .init(semantic: .color)) {
             disc.model?.materials = [PotteryMaterial.make(color: .white, finish: .matte, wireframe: false, texture: texture)]
         }
-        if let image = PotteryMaterial.ridgeNormalImage() {
-            ridgeNormalMap = try? await TextureResource(image: image, withName: nil, options: .init(semantic: .normal))
-        }
+        await setRidgeSeed(ridgeSeed, refresh: false)
         await loadEnvironment()
         refreshMaterials()
     }
@@ -283,6 +283,16 @@ final class PotteryScene {
             entity.components.set(ImageBasedLightReceiverComponent(imageBasedLight: lightSource))
         }
         #endif
+    }
+
+    /// 換一張拉坯紋貼圖（種子不同，紋路就不同）
+    func setRidgeSeed(_ seed: UInt32, refresh: Bool = true) async {
+        ridgeSeed = seed
+        guard let image = PotteryMaterial.ridgeNormalImage(seed: seed),
+              let texture = try? await TextureResource(image: image, withName: nil, options: .init(semantic: .normal)),
+              seed == ridgeSeed else { return }   // 等待期間又換了種子就丟掉這張
+        ridgeNormalMap = texture
+        if refresh { refreshMaterials() }
     }
 
     func setRidges(_ on: Bool) {

@@ -45,6 +45,7 @@ struct ContentView: View {
                 scene.setGlaze(model.glaze)
                 scene.setPattern(model.pattern)
                 scene.setFinish(model.finish)
+                scene.ridgeSeed = model.ridgeSeed
                 scene.setRidges(model.ridges)
                 scene.rebuild(model.spec)
                 await scene.loadTextures()
@@ -58,6 +59,7 @@ struct ContentView: View {
             .onChange(of: model.glaze) { scene.setGlaze(model.glaze) }
             .onChange(of: model.finish) { scene.setFinish(model.finish) }
             .onChange(of: model.ridges) { scene.setRidges(model.ridges) }
+            .onChange(of: model.ridgeSeed) { Task { await scene.setRidgeSeed(model.ridgeSeed) } }
             .onChange(of: model.mode) { scene.setMode(model.mode) }
             .onChange(of: model.showWireframe) { scene.setWireframe(model.showWireframe) }
             .onChange(of: model.camera) { scene.setCamera(model.camera) }
@@ -187,7 +189,7 @@ struct ContentView: View {
             Divider()
             Button("匯出 3D 模型（.glb）", systemImage: "cube") {
                 let input = GLBExport.Input(spec: model.spec, glaze: model.glaze, pattern: model.pattern,
-                                            finish: model.finish, ridges: model.ridges, photo: model.photo)
+                                            finish: model.finish, ridges: model.ridges, ridgeSeed: model.ridgeSeed, photo: model.photo)
                 guard let data = GLBExport.make(input) else {
                     fileMessage = "匯出失敗。"
                     return

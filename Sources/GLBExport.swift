@@ -14,6 +14,7 @@ enum GLBExport {
         var pattern: PotteryModel.Pattern
         var finish: Finish
         var ridges: Bool
+        var ridgeSeed: UInt32 = 0
         var photo: UIImage?
     }
 
@@ -38,7 +39,7 @@ enum GLBExport {
         }
         let usePhoto = input.pattern == .photo && input.photo != nil
         let colorImage = addImage(usePhoto ? input.photo.flatMap(PotteryScene.photoImage) : PotteryScene.patternImage(input.pattern))
-        let normalImage = input.ridges ? addImage(PotteryMaterial.ridgeNormalImage()) : nil
+        let normalImage = input.ridges ? addImage(PotteryMaterial.ridgeNormalImage(seed: input.ridgeSeed)) : nil
         // textures: 0 = 顏色，1 = 法線（沒有的就不存在）
         var textures: [[String: Any]] = []
         var colorTexture: Int?, normalTexture: Int?
