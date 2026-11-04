@@ -285,12 +285,31 @@ final class PotteryScene {
         #endif
     }
 
-    /// 換一張拉坯紋貼圖（種子不同，紋路就不同）
+    /// 做好的拉坯紋貼圖（以種子為鍵）。只留目前用的與預備給下一次的兩張
+    private var ridgeCache: [UInt32: TextureResource] = [:]
+    private var preparedNextSeed: UInt32?
+
+    /// 先把這個種子的貼圖在背景算好放進快取，之後換上時不用等。
+    /// 圖是在背景執行緒畫的（CPU 運算比較久），畫好才回到主執行緒建立貼圖
+    func prepareRidgeSeed(_ seed: UInt32) async {
+        preparedNextSeed = seed
+        await loadRidgeTexture(seed)
+        ridgeCache = ridgeCache.filter { $0.key == ridgeSeed || $0.key == preparedNextSeed }
+    }
+
+    private func loadRidgeTexture(_ seed: UInt32) async {
+        guard ridgeCache[seed] == nil else { return }
+        let image = await Task.detached(priority: .utility) { PotteryMaterial.ridgeNormalImage(seed: seed) }.value
+        guard let image, ridgeCache[seed] == nil,
+              let texture = try? await TextureResource(image: image, withName: nil, options: .init(semantic: .normal)) else { return }
+        ridgeCache[seed] = texture
+    }
+
+    /// 換上這個種子的拉坯紋貼圖（種子不同，紋路就不同）。已經預先算好的會馬上換上
     func setRidgeSeed(_ seed: UInt32, refresh: Bool = true) async {
         ridgeSeed = seed
-        guard let image = PotteryMaterial.ridgeNormalImage(seed: seed),
-              let texture = try? await TextureResource(image: image, withName: nil, options: .init(semantic: .normal)),
-              seed == ridgeSeed else { return }   // 等待期間又換了種子就丟掉這張
+        await loadRidgeTexture(seed)
+        guard seed == ridgeSeed, let texture = ridgeCache[seed] else { return }   // 等待期間又換了種子就放棄
         ridgeNormalMap = texture
         if refresh { refreshMaterials() }
     }

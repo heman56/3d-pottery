@@ -49,6 +49,7 @@ struct ContentView: View {
                 scene.setRidges(model.ridges)
                 scene.rebuild(model.spec)
                 await scene.loadTextures()
+                await scene.prepareRidgeSeed(model.nextRidgeSeed)
             }
             .gesture(dragGesture)
             .simultaneousGesture(zoomGesture)
@@ -60,6 +61,7 @@ struct ContentView: View {
             .onChange(of: model.finish) { scene.setFinish(model.finish) }
             .onChange(of: model.ridges) { scene.setRidges(model.ridges) }
             .onChange(of: model.ridgeSeed) { Task { await scene.setRidgeSeed(model.ridgeSeed) } }
+            .onChange(of: model.nextRidgeSeed) { Task { await scene.prepareRidgeSeed(model.nextRidgeSeed) } }
             .onChange(of: model.mode) { scene.setMode(model.mode) }
             .onChange(of: model.showWireframe) { scene.setWireframe(model.showWireframe) }
             .onChange(of: model.camera) { scene.setCamera(model.camera) }

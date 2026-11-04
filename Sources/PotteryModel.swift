@@ -23,6 +23,14 @@ final class PotteryModel {
     private(set) var ridges = true
     /// 拉坯紋的亂數種子：每件新陶器、每次重新打開拉坯紋都換一個，紋路就不一樣；存進 .pottery
     private(set) var ridgeSeed = PotteryModel.randomSeed()
+    /// 下一次要用的種子：先決定好，畫面就能提前在背景把貼圖算好
+    private(set) var nextRidgeSeed = PotteryModel.randomSeed()
+
+    private func takeNextRidgeSeed() -> UInt32 {
+        let seed = nextRidgeSeed
+        nextRidgeSeed = Self.randomSeed()
+        return seed
+    }
 
     static func randomSeed() -> UInt32 { UInt32.random(in: 1...UInt32.max) }
     /// 貼滿陶器外面的照片（只有「照片」花紋會用到）。照片會被縮放成「繞一圈 tilesAround 張、
@@ -92,7 +100,7 @@ final class PotteryModel {
         pattern = .stripes
         finish = .matte
         ridges = true
-        ridgeSeed = Self.randomSeed()
+        ridgeSeed = takeNextRidgeSeed()
         photo = nil
         tilesAround = 4
         tilesUp = 2
@@ -266,7 +274,7 @@ final class PotteryModel {
         guard on != ridges else { return }
         record(snapshot)
         ridges = on
-        if on { ridgeSeed = Self.randomSeed() }
+        if on { ridgeSeed = takeNextRidgeSeed() }
     }
 
     func setPattern(_ newPattern: Pattern) {
