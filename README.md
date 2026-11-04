@@ -29,6 +29,10 @@
 
 需要 Xcode 16 以上與 [XcodeGen](https://github.com/yonaskolb/XcodeGen)。
 
+## 授權
+
+[MIT License](LICENSE)：學生和老師都可以自由使用、修改、分享，教學與課堂使用都不需要另外申請。
+
 ## 素材
 
 環境光 HDRI 來自 Poly Haven，授權 CC0，詳見 [Resources/CREDITS.md](Resources/CREDITS.md)。

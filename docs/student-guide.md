@@ -12,7 +12,7 @@
 
 ### 1. 下載
 
-1. 在 iPad 的 Safari 打開老師給你的下載頁（GitHub 的 **Releases** 頁面）。
+1. 在 iPad 的 Safari 打開下載頁：<https://github.com/heman56/3d-pottery/releases/latest>（GitHub 的 **Releases** 頁面）。
 2. 找到最新版本，點 **`PotteryMaster.swiftpm.zip`** 下載。
 3. 如果 Safari 問你要不要下載，按「下載」。
 
